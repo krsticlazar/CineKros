@@ -1,0 +1,97 @@
+# Local planning, setup notes, and personal working material.
+/.local/
+
+# Local secrets. Only empty, reviewed examples belong in Git.
+.env
+.env.*
+!.env.example
+.secrets/
+secrets/
+credentials/
+*credentials*.json
+service-account*.json
+*.pem
+*.key
+*.pfx
+*.p12
+appsettings.Local.json
+appsettings.*.local.json
+
+# Research data, derived catalogs, embeddings, and provider caches.
+# Keep small reviewed fixtures/results outside these local-only directories.
+/database/data/*
+!/database/data/README.md
+/data/
+/datasets/
+/raw/
+/embeddings/
+/downloads/
+/artifacts/
+/cache/
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+*.bz2
+*.xz
+*.parquet
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.safetensors
+*.onnx
+
+# Database state and backups.
+/database/docker/volumes/
+/database/docker/data/
+/database/volumes/
+pgdata/
+postgres-data/
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+
+# Raw logs are local; put sanitized, reviewed summaries in Testiranje/reports.
+*.log
+*.log.*
+**/logs/*
+!/Testiranje/logs/README.md
+/Testiranje/results/local/
+/Testiranje/experiments/local/
+
+# .NET, Node, frontend, and test-generated output.
+[Bb]in/
+[Oo]bj/
+node_modules/
+dist/
+build/
+out/
+coverage/
+TestResults/
+test-results/
+playwright-report/
+blob-report/
+.nyc_output/
+.cache/
+.vite/
+*.tsbuildinfo
+
+# Personal IDE, operating-system, and temporary files.
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.swp
+~$*
