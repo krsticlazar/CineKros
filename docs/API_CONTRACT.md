@@ -1,105 +1,87 @@
-# Recommendation API — Draft
+# Recommendation API — Public Contract v2.0.0 (fake-backed pre-database flow)
 
-**Status: draft / not frozen / no endpoint implemented.**
+Status: MAIN-frozen for the user-authorized local fake flow on 2026-09-26. This intentionally supersedes the incompatible v1.0.0 `query`/`locale` and `results`/`error` business boundary. The prior accepted contract is retained in local planning archive. v2 does not authorize PostgreSQL/pgvector, live Gemini/TMDB, embeddings, final B2 filter grammar or production deployment.
 
-This is the initial interface outline; finalize it before independent frontend/backend implementation. See [architecture](ARCHITECTURE.md) and [technical decisions](DECISIONS.md).
+## Request and transport
 
-## Endpoint and request
-
-```http
-POST /api/recommendations
-Content-Type: application/json
-```
+`POST /api/recommendations` with `Content-Type: application/json` (no charset or explicit UTF-8) and exactly two case-sensitive required properties, without extras/duplicates/coercion:
 
 ```json
-{
-  "query": "Find dark science fiction after 2010, at most 120 minutes, preferably with little action.",
-  "locale": "en"
-}
+{"language":"sr","message":"Želim mračan SF posle 2010. do dva sata."}
 ```
 
-Planned required request fields:
+`language` is exactly `sr` or `en` and controls localized UI copy, **not** the language of the internal semantic query or a film-language filter. `message` is user natural language. The browser sends neither a Gemini prompt nor a parsed query. Encoded body limit remains 65,536 bytes. Reject malformed JSON, wrong media/charset, invalid UTF-8, duplicate/extra properties, wrong types or unsupported language before invoking a parser/search provider.
 
-| Field | Type | Planned meaning |
-| --- | --- | --- |
-| `query` | string | Film request, 1–2,000 characters after trimming outer whitespace |
-| `locale` | `"sr"` or `"en"` | UI language; not a constraint on the film's original language |
+Trim only outer Unicode whitespace defined in v1: U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F and U+3000. Do not rewrite inner text. Count Unicode scalar values after trim; accept 1–500 before the cheap usability checks, reject unpaired surrogates. The cheap local checks then reject fewer than two Unicode letter/digit scalars, punctuation/symbol-only input, and one identical letter/digit repeated at least eight times with no other letter/digit (e.g. twenty `a` characters). `horor`, `SF` and `dark sci-fi` pass locally. No dictionary, spellcheck or natural-language model is part of local validation. Parser rejection of a locally valid but unclear/non-film request is a separate controlled alert.
 
-Every submission is stateless. There is no history, session/profile, or public experiment-mode parameter. Final treatment of missing/extra fields and Unicode length counting must be frozen in Phase A. The locale does not turn a user's soft preference into a hard filter.
+Malformed transport and locally invalid input return the `INVALID_REQUEST` alert (HTTP 400), with zero parser/search calls. The backend is authoritative; client-side early checks may improve UX but may not replace server checks. The local fake deployment uses ASP.NET Core's built-in, configurable fixed-window per-IP rate limit (default 30 requests/60 seconds, no new dependency); rejection is the sanitized technical `RATE_LIMITED` error (HTTP 429) before parser/search. Production proxy/IP policy and limits require a later review.
 
-## Success outline
+## Internal parser boundary (never sent to browser)
 
-HTTP 200:
+The parser consumes a versioned system instruction separately from user content `{ "language": ..., "message": ... }` and returns exactly one tagged result:
 
 ```json
-{
-  "results": [
-    {
-      "title": "Example Movie",
-      "year": 2016,
-      "imdbUrl": "https://www.imdb.com/title/tt0000001/",
-      "posterUrl": null
-    }
-  ]
-}
+{"type":"query","query":{"hardFilters":{"yearMin":2010,"runtimeMax":120,"genres":["Sci-Fi"]},"semanticQuery":"dark atmospheric science fiction"}}
 ```
 
-This synthetic example demonstrates a one-result partial response, not an actual recommendation or metadata assertion about that IMDb ID.
-
-| Field | Type | Planned behavior |
-| --- | --- | --- |
-| `results` | movie array | 1–10 distinct eligible films in ranked order |
-| `title` | string | Nonempty display title |
-| `year` | integer or null | Omit the year from the overlay when unknown |
-| `imdbUrl` | string | Outbound IMDb movie link derived from the catalog IMDb ID |
-| `posterUrl` | string or null | Approved-provider poster URL; null/broken image gets a local fallback |
-
-Target ten movies; a 1–9 response uses the same envelope. The frontend derives the localized "fewer matches available" notice from the count. Never fill with duplicates or movies violating constraints. With zero matches, return the planned `NO_RESULTS` error rather than a padded list.
-
-Do not expose embeddings, raw Gemini output, parser `reason`, database-only IDs, or unused movie fields. URL validation and exact nullable display examples remain freeze tasks.
-
-## Error outline
+or:
 
 ```json
-{
-  "error": {
-    "code": "NO_RESULTS"
-  }
-}
+{"type":"alert","alertCode":"QUERY_UNCLEAR"}
 ```
 
-The frontend maps stable codes to friendly localized messages. Do not render arbitrary provider errors or parser explanations.
+For this **temporary fake-only slice**, `hardFilters` has no extra keys and may contain `yearMin` (integer, inclusive), `runtimeMax` (positive integer minutes, inclusive), and `genres` (exactly one element if present). The genre is one exact MovieLens 32M catalog label from: `Action`, `Adventure`, `Animation`, `Children`, `Comedy`, `Crime`, `Documentary`, `Drama`, `Fantasy`, `Film-Noir`, `Horror`, `IMAX`, `Musical`, `Mystery`, `Romance`, `Sci-Fi`, `Thriller`, `War`, `Western`. `(no genres listed)` is not a genre. Textual filter values and nonempty `semanticQuery` are in English for both user languages; the title of a film is never translated. Do not copy a Serbian phrase into `semanticQuery`. An active filter never admits null metadata. Any other explicit hard criterion is `UNSUPPORTED_REQUEST` in this slice; no filter is silently dropped or weakened. This does not freeze final B2/C1 operators, aliases, person semantics or hard-filter-only retrieval/ranking.
 
-| HTTP | Code | Intended condition |
+Allowed parser alert codes are `QUERY_UNCLEAR`, `NOT_MOVIE_REQUEST`, `UNSUPPORTED_REQUEST`. The parser does not generate alert prose, film lists, IMDb/TMDB fields, SQL, or recommendations. Validate even a fake/provider result before search: exact tagged shape, allowed keys/codes, value types/bounds, source-label genre and English nonempty semanticQuery. Malformed/invalid parser output is a sanitized technical `PARSER_INVALID_RESPONSE`, never executable search input. A hard-filter-only request whose semantic text cannot be specified under the deferred B3 policy returns `QUERY_UNCLEAR` in this temporary fake flow; it must not cause a live embedding request. No real Gemini adapter is installed or invoked.
+
+## Normal business responses
+
+Normal business responses are **only** the following two tagged shapes. The internal parser query/hard filters and provider diagnostics never appear on the wire.
+
+Alert (HTTP 400 for local `INVALID_REQUEST`, 422 for parser alerts, 200 for `NO_RESULTS`):
+
+```json
+{"type":"alert","alert":{"code":"NO_RESULTS","message":"Nema filmova koji ispunjavaju sve obavezne uslove."}}
+```
+
+Business alert codes: `INVALID_REQUEST`, `QUERY_UNCLEAR`, `NOT_MOVIE_REQUEST`, `UNSUPPORTED_REQUEST`, `NO_RESULTS`. The backend selects deterministic localized text by code and request language; if language is absent/invalid, use Serbian for the `INVALID_REQUEST` message. No browser `alert()` and no provider-generated prose.
+
+Movies (HTTP 200):
+
+```json
+{"type":"movies","movies":[{"title":"Synthetic Film 01","year":2014,"imdbUrl":"https://www.imdb.com/title/tt0000001/","posterUrl":null}],"meta":{"count":1,"partial":true}}
+```
+
+The compact card retains the already accepted v1 fields: `title` nonblank, `year` integer/null, backend-constructed HTTPS `imdbUrl` from a valid IMDb ID, and validated HTTPS TMDB `posterUrl`/null. `imdbId` and relative `posterPath` remain internal catalog values, not duplicate wire fields. Cards are distinct by movie identity, ranked in provider order, at most ten; no raw vector/parser/data-only fields. `meta.count` exactly equals `movies.length`; `partial` is `true` iff count is 1–9, `false` iff 10. Zero produces `NO_RESULTS`, not an empty movies response. Hard filters must be enforced by the fake search boundary as well as later real search; never pad or relax to ten. The frontend displays the existing localized partial notice only when `meta.partial` is true.
+
+Backend-owned business copy (exact text):
+
+| Code | SR | EN |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | Malformed/invalid input or unsupported locale |
-| 422 | `INVALID_MOVIE_QUERY` | Insufficient movie-search intent |
-| 422 | `UNSUPPORTED_FILTER` | An explicit requested criterion cannot be reliably enforced |
-| 422 | `NO_RESULTS` | No movie satisfies mandatory conditions |
-| 429 | `AI_RATE_LIMITED` | Temporary throttling or an undifferentiated provider rate limit |
-| 429 | `AI_QUOTA_EXHAUSTED` | Confirmed exhausted quota; do not infer this from every 429 |
-| 502 | `AI_INVALID_RESPONSE` | Provider output fails structure or business-value checks |
-| 503 | `AI_PROVIDER_UNAVAILABLE` | AI provider outage or timeout |
-| 503 | `SEARCH_UNAVAILABLE` | Database/search temporarily unavailable |
-| 500 | `INTERNAL_ERROR` | Unexpected internal failure |
+| `INVALID_REQUEST` | Unesi ispravan zahtev za filmove. | Enter a valid movie request. |
+| `QUERY_UNCLEAR` | Napiši malo jasnije kakav film tražiš. | Describe the movie you want more clearly. |
+| `NOT_MOVIE_REQUEST` | Napiši zahtev za preporuku filma. | Enter a movie recommendation request. |
+| `UNSUPPORTED_REQUEST` | Jedan obavezan uslov trenutno ne možemo pouzdano da proverimo. Izmeni upit. | We cannot reliably check one required condition yet. Please revise your request. |
+| `NO_RESULTS` | Nema filmova koji ispunjavaju sve obavezne uslove. | No movies meet all the required conditions. |
 
-Final retry/header behavior is a Phase A task. TMDB enrichment failure is recorded by the offline job; there is no fresh TMDB API dependency in the recommendation request. Image loading failure is a UI fallback, not an AI error.
+The retry button text is SR `Pokušaj ponovo` / EN `Try again`; new-search text is SR `Nova pretraga` / EN `New search`. The existing partial notice remains SR `Prikazani su svi pronađeni filmovi koji ispunjavaju uslove.` / EN `Showing all available movies that meet your requirements.` Film titles are never localized.
 
-## Internal parser boundary — incomplete by design
+## Technical failures (not business alerts)
 
-Gemini returns intent validity, semantic query text, and structured hard filters. Backend validation is mandatory. The internal parser object is not the public response. Supported filter fields, rating source/scale, actors/directors, negation, combinations, and exact range semantics depend on A/B decisions and must be completed before the final parser is implemented.
+Technical/rate-limit failures keep a separate sanitized wire shape and status, with no internal payload:
 
-Rules already fixed:
+```json
+{"error":{"code":"PROVIDER_UNAVAILABLE"}}
+```
 
-- A film violating a hard filter is never returned.
-- Missing metadata cannot satisfy an active condition.
-- Explicit "at most 120 minutes" is a hard maximum when supported.
-- "I would prefer a shorter movie" remains semantic text.
-- PostgreSQL filters; pgvector ranks eligible candidates only.
-- Start without a similarity threshold; add one only if tests justify it.
+`RATE_LIMITED` = HTTP 429, `PARSER_INVALID_RESPONSE` = HTTP 502, `PROVIDER_UNAVAILABLE` (fake parser failure / future provider outage) = HTTP 503, `SEARCH_UNAVAILABLE` (fake search failure / future search outage) = HTTP 503, and `INTERNAL_ERROR` = HTTP 500. The frontend maps these codes to deterministic SR/EN text, treating unknown/malformed responses as generic `INTERNAL_ERROR`; raw exception/stack/provider payload/key is never shown. No automatic browser retry, public `Retry-After` contract or real provider retry is introduced. Cancellation propagates where possible.
 
-## Compatibility
+## Frontend state and local fake integration
 
-The public contract is not versioned or frozen. Input edge cases, URL rules, retry semantics and representative fixtures must be specified before implementation. Internal parser fields depend on catalog metadata. Academic methodology is independent of the HTTP boundary.
+On submit, preserve Enter/Send behavior, trim the message, immediately start `fetch` to relative `/api/recommendations`, animate the prompt out and loading in. Use `AbortController` and a monotonically increasing request generation so an older completion cannot overwrite the latest state. A business alert opens an accessible CineKros dialog (not `window.alert`); retry closes it, restores the prompt, keeps the previous text and locale. A movies response hides loading and enters cards with restrained motion, preserving IMDb/poster/focus/grid behavior; new search removes results without page reload, restores the prompt and retains locale (input may clear). Technical errors use sanitized localized UI, distinct from a business alert. Respect `prefers-reduced-motion` throughout. The development Vite server proxies `/api` to the existing backend loopback `http://127.0.0.1:5179`, with no browser provider credentials or broad CORS policy; production API base URL configuration remains a separate deployment concern.
 
-MovieLens Tag Genome 2021 is confirmed by Lazar (2026-09-24). Academic evaluation choices remain pending mentor confirmation independently of the HTTP contract. Do not add research metrics or a public retrieval-mode switch while finishing this contract.
+Local fake adapters must deterministically expose ten, 1–9, zero, parser-alert and simulated technical-error paths via documented demo messages; scenario routing belongs behind parser/search interfaces, never inside the HTTP controller. The fake search must enforce the temporary hard-filter slice against synthetic structured candidate metadata, including null-fails-active-filter. No PostgreSQL, pgvector, live Gemini, live TMDB or live embeddings. This v2 fake flow stops before C1; future real adapters require their own B2/B3/C1 gates and explicit authorization.
+
+## Revision discipline
+
+Backend and frontend workers read this exact active contract. Changes are MAIN-owned and require corresponding fixture/test updates before worker release. HTTP request and response examples, test fixtures and implementation must agree. No worker invents an additional public field, internal filter, translation/alias or hidden fallback.

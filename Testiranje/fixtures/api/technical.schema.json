@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["error"],"properties":{"error":{"type":"object","additionalProperties":false,"required":["code"],"properties":{"code":{"enum":["RATE_LIMITED","PARSER_INVALID_RESPONSE","PROVIDER_UNAVAILABLE","SEARCH_UNAVAILABLE","INTERNAL_ERROR"]}}}}}

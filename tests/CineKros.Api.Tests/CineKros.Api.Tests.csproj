@@ -1,0 +1,18 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CineKros.Api.Tests</RootNamespace>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/backend/CineKros.Api/CineKros.Api.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../../src/backend/CineKros.Api/Prompts/movie-query-parser.md" Link="Prompts/movie-query-parser.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

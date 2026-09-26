@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/database/" />
+  <Folder Name="/database/etl/">
+    <Project Path="database/etl/CineKros.Etl/CineKros.Etl.csproj" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/backend/">
+    <Project Path="src/backend/CineKros.Api/CineKros.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CineKros.Api.Tests/CineKros.Api.Tests.csproj" />
+    <Project Path="tests/CineKros.Etl.Tests/CineKros.Etl.Tests.csproj" />
+  </Folder>
+</Solution>

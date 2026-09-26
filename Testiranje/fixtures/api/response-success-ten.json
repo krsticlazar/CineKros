@@ -1,0 +1,64 @@
+{
+  "results": [
+    {
+      "title": "Synthetic Film 01",
+      "year": 2001,
+      "imdbUrl": "https://www.imdb.com/title/tt0000001/",
+      "posterUrl": "https://image.tmdb.org/t/p/w500/synthetic-01.jpg"
+    },
+    {
+      "title": "Synthetic Film 02",
+      "year": 2002,
+      "imdbUrl": "https://www.imdb.com/title/tt0000002/",
+      "posterUrl": null
+    },
+    {
+      "title": "Synthetic Film 03",
+      "year": null,
+      "imdbUrl": "https://www.imdb.com/title/tt0000003/",
+      "posterUrl": "https://image.tmdb.org/t/p/w500/synthetic-03.jpg"
+    },
+    {
+      "title": "Synthetic Film 04",
+      "year": 2004,
+      "imdbUrl": "https://www.imdb.com/title/tt0000004/",
+      "posterUrl": null
+    },
+    {
+      "title": "Synthetic Film 05",
+      "year": 2005,
+      "imdbUrl": "https://www.imdb.com/title/tt0000005/",
+      "posterUrl": "https://image.tmdb.org/t/p/w500/synthetic-05.jpg"
+    },
+    {
+      "title": "Synthetic Film 06",
+      "year": null,
+      "imdbUrl": "https://www.imdb.com/title/tt0000006/",
+      "posterUrl": null
+    },
+    {
+      "title": "Synthetic Film 07",
+      "year": 2007,
+      "imdbUrl": "https://www.imdb.com/title/tt0000007/",
+      "posterUrl": "https://image.tmdb.org/t/p/w500/synthetic-07.jpg"
+    },
+    {
+      "title": "Synthetic Film 08",
+      "year": 2008,
+      "imdbUrl": "https://www.imdb.com/title/tt0000008/",
+      "posterUrl": null
+    },
+    {
+      "title": "Synthetic Film 09",
+      "year": null,
+      "imdbUrl": "https://www.imdb.com/title/tt0000009/",
+      "posterUrl": "https://image.tmdb.org/t/p/w500/synthetic-09.jpg"
+    },
+    {
+      "title": "Synthetic Film 10",
+      "year": 2010,
+      "imdbUrl": "https://www.imdb.com/title/tt0000010/",
+      "posterUrl": null
+    }
+  ]
+}

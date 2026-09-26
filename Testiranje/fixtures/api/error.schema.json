@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "error"
+  ],
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "INVALID_REQUEST",
+            "INVALID_MOVIE_QUERY",
+            "UNSUPPORTED_FILTER",
+            "NO_RESULTS",
+            "AI_RATE_LIMITED",
+            "AI_QUOTA_EXHAUSTED",
+            "AI_INVALID_RESPONSE",
+            "AI_PROVIDER_UNAVAILABLE",
+            "SEARCH_UNAVAILABLE",
+            "INTERNAL_ERROR"
+          ]
+        }
+      }
+    }
+  }
+}
