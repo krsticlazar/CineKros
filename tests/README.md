@@ -1,7 +1,12 @@
-# Application Tests
+# Tests
 
-Reserved for later unit/integration/end-to-end tests. There is no executable test project in Phase 0 and no package restore or provider test has been performed.
+The .NET test projects are included in `CineKros.slnx`. Run them after locked restore and build:
 
-Future tests cover parser business validation, error mapping, ETL consistency, real PostgreSQL/pgvector hard-filter behavior, and frontend contract/accessibility states. Ordinary tests use fake/recorded providers and small synthetic data, never live Gemini calls.
+```powershell
+dotnet restore CineKros.slnx --locked-mode
+dotnet test CineKros.slnx --no-restore
+```
 
-Meaningful thesis evidence is summarized in `../Testiranje/`. Academic metrics and sampling remain pending mentor confirmation independently of technical correctness tests.
+The active HTTP contract examples and isolated validator are in `fixtures/`. From the repository root, run `npm ci --prefix tests/fixtures` once, then `npm run check:fixtures --prefix tests/fixtures`.
+
+Routine checks use fixtures, fakes or small synthetic data and do not require live Gemini requests. Live provider checks and academic evaluation are separate activities; no evaluation results are claimed here.

@@ -1,0 +1,4 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/embedding/CineKros.Embedding/CineKros.Embedding.csproj" /></ItemGroup>
+</Project>

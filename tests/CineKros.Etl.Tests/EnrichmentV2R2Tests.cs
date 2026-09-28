@@ -10,6 +10,157 @@ namespace CineKros.Etl.Tests;
 public sealed class EnrichmentV2R2Tests
 {
     [TestMethod]
+    public async Task AttemptGuard_EnforcesGlobalCapAcrossConcurrentRetriesAndCheckpointsWithoutPublishing()
+    {
+        using var fixture = new TinyFixture();
+        using var guard = new TmdbAttemptGuard(2, TimeSpan.FromMinutes(120));
+        var handler = new FixtureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        using var http = new HttpClient(handler);
+        var tmdb = new TmdbDetailsClient(http, "fake-token", (_, _) => Task.CompletedTask, guard);
+        var options = fixture.Options("cap-output") with { MaxConcurrency = 4 };
+
+        await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => EnrichmentV2Runner.RunAsync(options, tmdb.GetAsync,
+            CancellationToken.None, fixture.TestHooks(), guard));
+
+        Assert.AreEqual(2, handler.Paths.Count);
+        Assert.AreEqual(2, guard.AttemptCount);
+        Assert.AreEqual("attempt_cap", guard.StopReason);
+        Assert.IsFalse(Directory.Exists(fixture.PathFor("cap-output")));
+        using var checkpoint = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(fixture.PathFor("cache"), "checkpoint-v2.json")));
+        Assert.AreEqual("attempt_cap", checkpoint.RootElement.GetProperty("stopReason").GetString());
+        Assert.AreEqual(2, checkpoint.RootElement.GetProperty("actualHttpAttempts").GetInt32());
+        Assert.AreEqual(1, checkpoint.RootElement.GetProperty("attemptedTmdbIdCount").GetInt32());
+        Assert.IsTrue(checkpoint.RootElement.GetProperty("unresolvedIds").GetArrayLength() > 0);
+    }
+
+    [TestMethod]
+    public async Task AttemptGuard_StopsSchedulingOnExhausted429AndResumesOnlyUncachedId()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"));
+        using var guard = new TmdbAttemptGuard(20, TimeSpan.FromMinutes(120));
+        var requests = 0;
+        var handler = new FixtureHandler(_ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.TooManyRequests);
+        });
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token", (_, _) => Task.CompletedTask, guard);
+        try
+        {
+            await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => EnrichmentV2Runner.FetchPendingAsync(
+                Enumerable.Range(1, 40).ToArray(), new Dictionary<int, TmdbDetails>(), directory, 1,
+                client.GetAsync, CancellationToken.None, attemptGuard: guard));
+            Assert.AreEqual(3, requests);
+            Assert.AreEqual(3, guard.AttemptCount);
+            using var checkpoint = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json")));
+            Assert.AreEqual(1, checkpoint.RootElement.GetProperty("failureClasses")[0].GetProperty("count").GetInt32());
+            Assert.AreEqual("http_429", checkpoint.RootElement.GetProperty("failureClasses")[0].GetProperty("class").GetString());
+            Assert.AreEqual(40, checkpoint.RootElement.GetProperty("unresolvedIds").GetArrayLength());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestMethod]
+    public async Task AttemptGuard_CapNeverAllowsRequestNPlusOneWithConcurrentIdsAndRetries()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"));
+        using var guard = new TmdbAttemptGuard(7, TimeSpan.FromMinutes(120));
+        var handler = new FixtureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token", (_, _) => Task.CompletedTask, guard);
+        try
+        {
+            await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => EnrichmentV2Runner.FetchPendingAsync(
+                Enumerable.Range(1, 50).ToArray(), new Dictionary<int, TmdbDetails>(), directory, 4,
+                client.GetAsync, CancellationToken.None, attemptGuard: guard));
+            Assert.AreEqual(7, guard.AttemptCount);
+            Assert.AreEqual(7, handler.Paths.Count);
+            Assert.AreEqual("attempt_cap", guard.StopReason);
+            using var checkpoint = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json")));
+            Assert.AreEqual(7, checkpoint.RootElement.GetProperty("actualHttpAttempts").GetInt32());
+            Assert.IsTrue(checkpoint.RootElement.GetProperty("attemptedTmdbIdCount").GetInt32() is >= 1 and <= 4);
+            Assert.AreEqual("attempt_cap", checkpoint.RootElement.GetProperty("stopReason").GetString());
+            Assert.AreEqual(50, checkpoint.RootElement.GetProperty("unresolvedIds").GetArrayLength());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestMethod]
+    public async Task AttemptGuard_WallDeadlineStopsNewIdsAndCheckpointsAfterInflightRequestCompletes()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"));
+        using var guard = new TmdbAttemptGuard(100, TimeSpan.FromMilliseconds(30));
+        var handler = new FixtureHandler(request =>
+        {
+            Thread.Sleep(80);
+            var id = Path.GetFileName(request.RequestUri!.AbsolutePath);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent($"{{\"id\":{id}}}") };
+        });
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token", attemptGuard: guard);
+        try
+        {
+            await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => EnrichmentV2Runner.FetchPendingAsync(
+                Enumerable.Range(1, 10).ToArray(), new Dictionary<int, TmdbDetails>(), directory, 1,
+                client.GetAsync, CancellationToken.None, attemptGuard: guard));
+            Assert.AreEqual(1, handler.Paths.Count);
+            Assert.AreEqual("wall_clock", guard.StopReason);
+            using var checkpoint = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json")));
+            Assert.AreEqual("wall_clock", checkpoint.RootElement.GetProperty("stopReason").GetString());
+            Assert.AreEqual(1, checkpoint.RootElement.GetProperty("actualHttpAttempts").GetInt32());
+            Assert.AreEqual(1, checkpoint.RootElement.GetProperty("attemptedTmdbIdCount").GetInt32());
+            Assert.AreEqual(9, checkpoint.RootElement.GetProperty("unresolvedIds").GetArrayLength());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestMethod]
+    public async Task InvalidDetailResponseStopsSchedulingAndRecordsSanitizedCheckpoint()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"));
+        var handler = new FixtureHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"id\":999}")
+        });
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token");
+        try
+        {
+            await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => EnrichmentV2Runner.FetchPendingAsync(
+                Enumerable.Range(1, 12).ToArray(), new Dictionary<int, TmdbDetails>(), directory, 1,
+                client.GetAsync, CancellationToken.None));
+            Assert.AreEqual(1, handler.Paths.Count);
+            using var checkpoint = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json")));
+            Assert.AreEqual(1, checkpoint.RootElement.GetProperty("nonterminalFailureCount").GetInt32());
+            Assert.AreEqual("invalid_response", checkpoint.RootElement.GetProperty("failureClasses")[0].GetProperty("class").GetString());
+            Assert.AreEqual(12, checkpoint.RootElement.GetProperty("unresolvedIds").GetArrayLength());
+            Assert.IsFalse(File.ReadAllText(Path.Combine(directory, "checkpoint-v2.json")).Contains("fake-token", StringComparison.Ordinal));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [TestMethod]
+    public async Task AttemptGuard_CompletedManifestRecordsConfiguredEnvelopeAndActualAttempts()
+    {
+        using var fixture = new TinyFixture();
+        using var guard = new TmdbAttemptGuard(10, TimeSpan.FromMinutes(120));
+        var handler = new FixtureHandler();
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token", attemptGuard: guard);
+
+        await EnrichmentV2Runner.RunAsync(fixture.Options("guarded-complete"), client.GetAsync, CancellationToken.None,
+            fixture.TestHooks(), guard);
+
+        using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(fixture.PathFor("guarded-complete"), "manifest.json")));
+        var policy = manifest.RootElement.GetProperty("requestPolicy");
+        Assert.AreEqual(10, policy.GetProperty("globalHttpAttemptCap").GetInt32());
+        Assert.AreEqual(120, policy.GetProperty("wallTimeLimitMinutes").GetDouble());
+        Assert.AreEqual(1, policy.GetProperty("actualHttpAttempts").GetInt32());
+        Assert.AreEqual(1, policy.GetProperty("attemptedTmdbIdCount").GetInt32());
+    }
+
+    [TestMethod]
     public async Task TinySnapshot_ExercisesJoinNullPolicyRatingsCacheAndManifestEndToEnd()
     {
         using var fixture = new TinyFixture();
@@ -262,16 +413,21 @@ public sealed class EnrichmentV2R2Tests
 
     private sealed class FixtureHandler : HttpMessageHandler
     {
-        public List<string> Paths { get; } = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _response;
+        private readonly System.Collections.Concurrent.ConcurrentBag<string> _paths = [];
+        public FixtureHandler(Func<HttpRequestMessage, HttpResponseMessage>? response = null) => _response = response ?? (request =>
         {
-            var path = request.RequestUri!.AbsolutePath;
-            Paths.Add(path);
-            if (path != "/3/movie/101") throw new InvalidOperationException("Unexpected TMDB request path.");
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            if (request.RequestUri!.AbsolutePath != "/3/movie/101") throw new InvalidOperationException("Unexpected TMDB request path.");
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
                 Content = new StringContent("{\"id\":101,\"runtime\":95,\"original_language\":\"en\",\"poster_path\":\"/poster.jpg\",\"overview\":\"must not persist\"}")
-            });
+            };
+        });
+        public IReadOnlyCollection<string> Paths => _paths.ToArray();
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _paths.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(_response(request));
         }
     }
 }

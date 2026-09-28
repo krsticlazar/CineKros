@@ -6,6 +6,7 @@ import type { Movie, RecommendationResponse } from './types'
 import { readFileSync } from 'node:fs'
 
 const appStyles = readFileSync('src/App.css', 'utf8')
+const html = readFileSync('index.html', 'utf8')
 const movie = (number: number): Movie => ({ title: `Film ${number}`, year: number === 3 ? null : 2000 + number, imdbUrl: `https://www.imdb.com/title/tt${String(number).padStart(7, '0')}/`, posterUrl: number === 2 ? null : `https://image.tmdb.org/t/p/w500/${number}.jpg` })
 const response = (count: number): RecommendationResponse => ({ type: 'movies', movies: Array.from({ length: count }, (_, index) => movie(index + 1)), meta: { count, partial: count > 0 && count < 10 } })
 const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail }); return { promise, resolve, reject } }
@@ -49,19 +50,12 @@ describe('v2 recommendation frontend', () => {
     expect(await screen.findByRole('textbox')).toHaveValue('')
   })
 
-  it('keeps idle rotation on the logo and hover scale on its wrapper', () => {
-    expect(appStyles).toContain('animation: logo-idle 7s ease-in-out infinite;')
-    expect(appStyles).not.toMatch(/\.brand\s*\{[^}]*animation:\s*logo-idle/s)
-    expect(appStyles).toContain('.brand:hover {')
-    expect(appStyles).toContain('transform: scale(1.04)')
-    expect(appStyles).not.toContain('.brand:hover .brand-mark')
-    expect(appStyles).toContain('0%, 30% {')
-    expect(appStyles).toContain('12% {')
-    expect(appStyles).toContain('20% {')
-    expect(appStyles).toContain('24% {')
-    expect(appStyles).toContain('100% {')
-    expect(appStyles).toContain('.brand-mark,')
-    expect(appStyles).toContain('transition: none;')
+  it('shows the CineKros wordmark with a responsive header and local favicon', () => {
+    render(<App submit={vi.fn(() => Promise.resolve(response(10)))} />)
+    expect(screen.getByRole('heading', { name: 'CineKros' })).toHaveClass('brand-name')
+    expect(appStyles).toContain('.brand-name {')
+    expect(appStyles).toContain('flex-direction: column;')
+    expect(html).toContain('./src/assets/favicon.ico')
   })
 
   it('sends immediately on Enter, keeps Shift+Enter as newline, and displays loading transition', async () => {
@@ -228,9 +222,11 @@ describe('v2 recommendation frontend', () => {
   })
 
   it('preserves the existing rules panel and localized footer', async () => {
-    const user = userEvent.setup(); render(<App />); await user.click(screen.getByRole('button', { name: '↓ Pravila i ograničenja ↓' }))
+    const user = userEvent.setup(); render(<App />); await user.click(screen.getByRole('button', { name: '↓ Pravila i Ograničenja ↓' }))
     expect(screen.getByText('Katalog je ograničen na 9.730 filmova iz istraživačkog skupa podataka i ne predstavlja kompletnu bazu svih filmova.')).toBeInTheDocument()
+    expect(screen.getByText('MovieLens ocene su na skali od 1 do 5. Ako unesete ocenu veću od 5, sistem je deli sa 2 i koristi tako prilagođen prag za pretragu.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'EN' })); expect(screen.getByRole('contentinfo')).toHaveTextContent('© 2026 CineKros. All rights reserved. CineKros is an open-source project.')
+    expect(screen.getByText('MovieLens ratings use a 1–5 scale. If you enter a rating above 5, the system divides it by two and uses the adjusted threshold for the search.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'open-source' })).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })

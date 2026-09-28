@@ -1,0 +1,21 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "type": { "type": "STRING", "enum": ["query", "alert"] },
+    "query": {
+      "type": "OBJECT",
+      "nullable": true,
+      "properties": {
+        "year": { "type": "OBJECT", "properties": { "status": { "type": "STRING", "enum": ["present", "absent", "unsupported"] }, "min": { "type": "INTEGER", "nullable": true }, "max": { "type": "INTEGER", "nullable": true } }, "required": ["status", "min", "max"] },
+        "runtime": { "type": "OBJECT", "properties": { "status": { "type": "STRING", "enum": ["present", "absent", "unsupported"] }, "min": { "type": "INTEGER", "nullable": true }, "max": { "type": "INTEGER", "nullable": true } }, "required": ["status", "min", "max"] },
+        "genres": { "type": "OBJECT", "properties": { "status": { "type": "STRING", "enum": ["present", "absent", "unsupported"] }, "all": { "type": "ARRAY", "items": { "type": "STRING" } }, "any": { "type": "ARRAY", "items": { "type": "STRING" } } }, "required": ["status", "all", "any"] },
+        "rating": { "type": "OBJECT", "properties": { "status": { "type": "STRING", "enum": ["present", "absent", "unsupported"] }, "value": { "type": "NUMBER", "nullable": true }, "operator": { "type": "STRING", "nullable": true, "enum": ["gte", "gt"] }, "scale": { "type": "STRING", "nullable": true, "enum": ["five", "ten", "unspecified"] } }, "required": ["status", "value", "operator", "scale"] },
+        "originalLanguage": { "type": "OBJECT", "properties": { "status": { "type": "STRING", "enum": ["present", "absent", "unsupported"] }, "value": { "type": "STRING", "nullable": true } }, "required": ["status", "value"] },
+        "semanticQuery": { "type": "STRING", "nullable": true }
+      },
+      "required": ["year", "runtime", "genres", "rating", "originalLanguage", "semanticQuery"]
+    },
+    "alertCode": { "type": "STRING", "nullable": true, "enum": ["QUERY_UNCLEAR", "NOT_MOVIE_REQUEST", "UNSUPPORTED_REQUEST"] }
+  },
+  "required": ["type", "query", "alertCode"]
+}

@@ -1,10 +1,12 @@
 using CineKros.Api;
+using CineKros.Api.RealFlow;
+using CineKros.Api.Startup;
+using CineKros.Embedding;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSingleton(new MovieQueryPrompt(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Prompts", "movie-query-parser.md"))));
-builder.Services.AddSingleton<IQueryParser, FakeQueryParser>();
-builder.Services.AddSingleton<IMovieSearch, FakeMovieSearch>();
+var recommendationMode = RecommendationStartup.ResolveMode(builder.Environment);
+RecommendationStartup.RegisterServices(builder.Services, recommendationMode);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -15,8 +17,13 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+if (recommendationMode == "real")
+    _ = app.Services.GetRequiredService<E5EmbeddingModel>();
 app.UseRateLimiter();
-app.MapPost("/api/recommendations", RecommendationEndpoint.HandleAsync).RequireRateLimiting("recommendations");
+if (recommendationMode == "real")
+    app.MapPost("/api/recommendations", RealRecommendationEndpoint.HandleAsync).RequireRateLimiting("recommendations");
+else
+    app.MapPost("/api/recommendations", RecommendationEndpoint.HandleAsync).RequireRateLimiting("recommendations");
 app.Run();
 
 public partial class Program;

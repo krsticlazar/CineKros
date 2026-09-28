@@ -1,14 +1,24 @@
 <Solution>
   <Folder Name="/database/" />
-  <Folder Name="/database/etl/">
-    <Project Path="database/etl/CineKros.Etl/CineKros.Etl.csproj" />
+  <Folder Name="/src/etl/">
+    <Project Path="src/etl/CineKros.Etl/CineKros.Etl.csproj" />
+    <Project Path="src/etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj" />
+    <Project Path="src/etl/CineKros.Database.Migrator/CineKros.Database.Migrator.csproj" />
+    <Project Path="src/etl/CineKros.VectorImporter/CineKros.VectorImporter.csproj" />
+    <Project Path="src/etl/CineKros.E5.Generator/CineKros.E5.Generator.csproj" />
   </Folder>
-  <Folder Name="/src/" />
+  <Folder Name="/src/">
+    <Project Path="src/embedding/CineKros.Embedding/CineKros.Embedding.csproj" />
+  </Folder>
   <Folder Name="/src/backend/">
     <Project Path="src/backend/CineKros.Api/CineKros.Api.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CineKros.Embedding.Tests/CineKros.Embedding.Tests.csproj" />
+    <Project Path="tests/CineKros.E5.Generator.Tests/CineKros.E5.Generator.Tests.csproj" />
     <Project Path="tests/CineKros.Api.Tests/CineKros.Api.Tests.csproj" />
     <Project Path="tests/CineKros.Etl.Tests/CineKros.Etl.Tests.csproj" />
+    <Project Path="tests/CineKros.Importer.Tests/CineKros.Importer.Tests.csproj" />
+    <Project Path="tests/CineKros.VectorImporter.Tests/CineKros.VectorImporter.Tests.csproj" />
   </Folder>
 </Solution>

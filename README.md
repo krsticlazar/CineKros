@@ -1,42 +1,35 @@
 # CineKros
 
-Bachelor's thesis project by Lazar Krstić: a local hybrid movie search and recommendation system using an LLM query parser, mandatory metadata filters, and semantic retrieval.
+![CineKros logo](src/frontend/src/assets/CineKros_logo.svg)
 
-## Current state
+CineKros is a bachelor's thesis project by Lazar Krstić: a local hybrid movie search application. The React, TypeScript and Vite frontend sends a query to an ASP.NET Core API. Gemini `gemini-3.1-flash-lite` is used solely to parse queries into structured search intent; it does not select movies. PostgreSQL applies mandatory SQL hard filters, then exact pgvector cosine similarity ranks only eligible results.
 
-The repository contains the frozen public API contract, a pinned toolchain, source-data review, synthetic API fixtures and a fake-backed ASP.NET Core HTTP foundation. The recommendation engine, frontend, database and migrations are not implemented yet. Until the real service is wired, a valid API request receives `SEARCH_UNAVAILABLE`.
+The catalog contains 9,730 movies. Its semantic source combines MovieLens Tag Genome 2021 with approved MovieLens 32M enrichment and offline TMDB metadata. Document and runtime query embeddings use the local E5-base-v2 INT8 ONNX model with 768 dimensions. Film data, model files and generated vectors are local-only; they are not included in this repository.
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Public API contract v1.0.0](docs/API_CONTRACT.md)
-- [Project layout and toolchain](docs/TOOLCHAIN.md)
-- [Technical decisions](docs/DECISIONS.md)
-- [Data layout](database/data/README.md)
-- [Tag Genome source review](Testiranje/reports/tag-genome-source-review.md)
-- [Metadata export mapping](docs/DATA_MAPPING.md)
+With separately obtained source data and an offline TMDB cache, the tools in `src/etl/` prepare and validate catalog/vector artifacts for database import; `scripts/bootstrap-e5-model.ps1` obtains or verifies the pinned local model. The repository does not include the source datasets or generated artifacts.
 
-## Intended system
+## Repository
 
-React + TypeScript + Vite -> ASP.NET Core -> Gemini structured query parsing -> backend validation -> hard metadata filters plus a semantic query embedding -> PostgreSQL + pgvector -> up to ten movie cards.
-
-Hard constraints are mandatory. Soft preferences stay in semantic text. Similarity ranks eligible movies only. The existing CineKros SVG remains the product logo.
-
-MovieLens Tag Genome 2021 is the **confirmed and only MovieLens dataset** (Lazar, 2026-09-24). Its archive and extracted content are local and ignored; the extracted root is `database/data/raw/tag-genome-2021/`. Evaluation details still await consultation. No alternative dataset is selected.
-
-## Repository areas
-
-| Area | Purpose |
+| Path | Purpose |
 | --- | --- |
-| `assets/` | Existing logo assets, preserved |
-| `src/frontend/`, `src/backend/` | Frontend placeholder and fake-backed backend foundation |
-| `database/` | Planned Docker/migrations/ETL and local-only data |
-| `tests/` | Backend HTTP contract tests |
-| `Testiranje/` | Reproducible research evidence and reviewed results |
-| `docs/` | Architecture, API contracts and technical decision rationale |
-| `Diplomski/` | Thesis materials and the final document in Phase I |
-| `scripts/` | Public-contract fixture validator and later local workflow helpers |
+| `src/frontend/` | React/TypeScript/Vite application |
+| `src/backend/CineKros.Api/` | ASP.NET Core API and search runtime |
+| `src/embedding/` | Local E5 embedding runtime |
+| `src/etl/` | Catalog, database and vector tooling |
+| `database/docker/` and `database/migrations/` | PostgreSQL/pgvector Compose service and SQL migrations |
+| `tests/` | .NET tests and API fixture validation |
+| `scripts/` | Explicit local model bootstrap |
 
-Technical documentation and code are in English; UI strings will support Serbian and English.
+## Local development
 
-## Development baseline
+Prerequisites are .NET 10, Node.js 24, Docker with Compose, and PowerShell. Restore and check the .NET solution with:
 
-.NET 10 SDK, Node.js 24 LTS, and Docker with Compose. Run `npm ci` then `npm run check:fixtures` to validate the synthetic contract examples. Run `dotnet restore CineKros.slnx --locked-mode`, `dotnet build CineKros.slnx --no-restore` and `dotnet test CineKros.slnx --no-restore` for the fake-backed backend. `.env.example` contains empty configuration placeholders; credentials and raw/derived data are excluded from version control.
+```powershell
+dotnet restore CineKros.slnx --locked-mode
+dotnet build CineKros.slnx --no-restore
+dotnet test CineKros.slnx --no-restore
+```
+
+Install frontend dependencies with `npm ci --prefix src/frontend`, then use `npm run dev`, `npm run lint`, `npm test`, or `npm run build` from `src/frontend`. Validate API examples with `npm ci --prefix tests/fixtures` and `npm run check:fixtures --prefix tests/fixtures` from the repository root.
+
+To explicitly download or verify the pinned local E5 artifacts, run `pwsh -File scripts/bootstrap-e5-model.ps1` (or add `-VerifyOnly`). The normal Windows launcher is `src/start_script.cmd`; it reads required values from the process environment or ignored root `.env`, starts the PostgreSQL Compose service, then starts the API and frontend. It does not run migrations or import data. Generated data and model artifacts remain local.

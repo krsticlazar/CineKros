@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using CineKros.Api.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -33,7 +34,7 @@ public static class RecommendationEndpoint
         var timer = Stopwatch.StartNew(); var code = ApiErrorCodes.InternalError; var logger = loggerFactory.CreateLogger("CineKros.Api.Recommendations");
         try
         {
-            var attempt = await ParseRequestAsync(context.Request, context.RequestAborted);
+            var attempt = await ReadRequestAsync(context.Request, context.RequestAborted);
             var request = attempt.Request;
             if (request is null) { code = ApiErrorCodes.InvalidRequest; return Alert(code, attempt.Language, Statuses[code]); }
             ParserResult parsed;
@@ -56,10 +57,10 @@ public static class RecommendationEndpoint
             code = "SUCCESS";
             return Results.Json(new MoviesResponse("movies", cards, new Meta(cards.Count, cards.Count < 10)), statusCode: 200);
         }
-        finally { logger.LogInformation("Recommendation request completed. CorrelationId={CorrelationId} ContractVersion=v2.0.0 StageDurationMs={StageDurationMs} Code={Code}", context.TraceIdentifier, timer.ElapsedMilliseconds, code); }
+        finally { DevelopmentRequestSummary.LogCompletion(logger, context.RequestServices.GetRequiredService<IHostEnvironment>().IsDevelopment(), context.TraceIdentifier, timer.ElapsedMilliseconds, code); }
     }
 
-    private static async Task<(ParserInput? Request, string Language)> ParseRequestAsync(HttpRequest request, CancellationToken token)
+    internal static async Task<(ParserInput? Request, string Language)> ReadRequestAsync(HttpRequest request, CancellationToken token)
     {
         if (!HasAcceptedContentType(request.ContentType) || request.ContentLength > MaximumBodyBytes) return (null, "sr");
         byte[] body;
@@ -126,8 +127,8 @@ public static class RecommendationEndpoint
     }
     private static bool IsDigits(string s) => s.Length is >= 1 and <= 12 && s.All(c => c is >= '0' and <= '9');
     private static string? NormalizePoster(string? value) { if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value, UriKind.Absolute, out var u) || u.Scheme != "https" || !string.Equals(u.Host, "image.tmdb.org", StringComparison.OrdinalIgnoreCase) || !u.IsDefaultPort || !u.AbsolutePath.StartsWith("/t/p/", StringComparison.Ordinal) || u.UserInfo.Length != 0 || u.Query.Length != 0 || u.Fragment.Length != 0) return null; return value; }
-    private static IResult Alert(string code, string language, int status) { var text = Copy[code]; return Results.Json(new AlertResponse("alert", new AlertBody(code, language == "en" ? text.En : text.Sr)), statusCode: status); }
-    private static IResult Technical(string code) => Results.Json(new TechnicalResponse(new TechnicalBody(code)), statusCode: Statuses.GetValueOrDefault(code, 500));
+    internal static IResult Alert(string code, string language, int status) { var text = Copy[code]; return Results.Json(new AlertResponse("alert", new AlertBody(code, language == "en" ? text.En : text.Sr)), statusCode: status); }
+    internal static IResult Technical(string code) => Results.Json(new TechnicalResponse(new TechnicalBody(code)), statusCode: Statuses.GetValueOrDefault(code, 500));
     private sealed record MoviesResponse(string Type, IReadOnlyList<MovieCard> Movies, Meta Meta);
     private sealed record MovieCard(string Title, int? Year, string ImdbUrl, string? PosterUrl);
     private sealed record Meta(int Count, bool Partial);

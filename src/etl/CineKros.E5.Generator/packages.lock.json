@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
+      },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.29.0",
+        "contentHash": "bUO3Ryc42UVkDGByBIYU9/ogRURGHeMOEq96LMWnDBVMQGZpIahBhPRCeu+Qq6+EJh/dfxzFJBKZa0/+yMmpWQ==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.29.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed": {
+        "type": "Transitive",
+        "resolved": "1.29.0",
+        "contentHash": "jLy5PtzvRQCBFOczzfRY7zpuMVUyLwjO0Jsdd8MBZdmnPIqx5vW9cYDNyCqkrYpwkof8GlqBVaEUMWrMWRtvuw==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      },
+      "Npgsql": {
+        "type": "Transitive",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
+      "System.Numerics.Tensors": {
+        "type": "Transitive",
+        "resolved": "9.0.0",
+        "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
+      },
+      "Tokenizers.DotNet": {
+        "type": "Transitive",
+        "resolved": "1.4.1",
+        "contentHash": "uOAv3ttXMOv8OhyxdTxCCLN52EsjERhdY9jwGbncSzTbZvGzEDPQDqLkZpgD3RslwRVsv7YTXgScrEjsHnaa1w=="
+      },
+      "Tokenizers.DotNet.runtime.linux-x64": {
+        "type": "Transitive",
+        "resolved": "1.4.1",
+        "contentHash": "1+y49KrpvOKc9QYFpSy8/Xsot6LVH6oWQ1Ne4NBcZTopvVd+9J6AbgSmZKjMK/bhYZQjF7bnYS6EaeiXP/iJ3g=="
+      },
+      "Tokenizers.DotNet.runtime.win-x64": {
+        "type": "Transitive",
+        "resolved": "1.4.1",
+        "contentHash": "AcjRf1y5/ArFL16no9eR5Tg8HeS0CUdYfypASvszuE6+KfHXndmtnh5IeqWKnIP6F2KNSSGKXcncgXKx0RDcWQ=="
+      },
+      "cinekros.catalog.importer": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "cinekros.embedding": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime": "[1.29.0, )",
+          "Tokenizers.DotNet": "[1.4.1, )",
+          "Tokenizers.DotNet.runtime.linux-x64": "[1.4.1, )",
+          "Tokenizers.DotNet.runtime.win-x64": "[1.4.1, )"
+        }
+      }
+    }
+  }
+}

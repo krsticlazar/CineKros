@@ -8,7 +8,16 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Pgvector" Version="0.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../embedding/CineKros.Embedding/CineKros.Embedding.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="Prompts/movie-query-parser.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser-v4.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser.schema.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

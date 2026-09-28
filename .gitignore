@@ -1,5 +1,12 @@
 # Local planning, setup notes, and personal working material.
-/.local/
+**/.local/
+/docs/
+/research/
+/Diplomski/
+/MANUAL_QUERY_TESTS.md
+/src/backend/CineKros.Api/RealProviders/query-parser-v1.md
+/src/backend/CineKros.Api/RealProviders/query-parser-v2.md
+/src/backend/CineKros.Api/RealProviders/query-parser-v3.md
 
 # Local secrets. Only empty, reviewed examples belong in Git.
 .env
@@ -19,8 +26,10 @@ appsettings.*.local.json
 
 # Research data, derived catalogs, embeddings, and provider caches.
 # Keep small reviewed fixtures/results outside these local-only directories.
-/database/data/*
-!/database/data/README.md
+/database/data/
+/database/history/
+/database/ml-32m/
+/database/ml-32m.zip
 /data/
 /datasets/
 /raw/
@@ -56,13 +65,10 @@ postgres-data/
 *.sqlite3
 *.db
 
-# Raw logs are local; put sanitized, reviewed summaries in Testiranje/reports.
+# Raw logs and research artifacts are local-only.
 *.log
 *.log.*
 **/logs/*
-!/Testiranje/logs/README.md
-/Testiranje/results/local/
-/Testiranje/experiments/local/
 
 # .NET, Node, frontend, and test-generated output.
 [Bb]in/
@@ -79,6 +85,7 @@ blob-report/
 .nyc_output/
 .cache/
 .vite/
+**/.agy-reference/
 *.tsbuildinfo
 
 # Personal IDE, operating-system, and temporary files.

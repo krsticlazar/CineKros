@@ -96,47 +96,8 @@ button, input, textarea, a {
   gap: 24px;
 }
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-  transform-origin: 50% 50%;
-  transition: transform 0.25s ease;
-}
-
-.brand-mark {
-  width: clamp(96px, 9vw, 116px);
-  height: clamp(96px, 9vw, 116px);
-  object-fit: contain;
-  background: transparent;
-  display: block;
-  transform-origin: 50% 50%;
-  animation: logo-idle 7s ease-in-out infinite;
-}
-
-.brand:hover {
-  transform: scale(1.04);
-}
-
-@keyframes logo-idle {
-  0%, 30% {
-    transform: rotate(0deg);
-  }
-  12% {
-    transform: rotate(-3deg);
-  }
-  20% {
-    transform: rotate(0deg);
-  }
-  24% {
-    transform: rotate(3deg);
-  }
-  30% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(0deg);
-  }
+.brand-name {
+  margin: 0;
 }
 
 /* iOS-inspired sliding toggle in baby-blue palette (preserved untouched) */
@@ -288,13 +249,21 @@ button, input, textarea, a {
   animation: prompt-entrance 4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-h1 {
+h1,
+.search-panel h2 {
   margin: 0 0 28px;
   color: #05335e;
-  font-size: clamp(2rem, 3.4vw, 2.75rem);
   font-weight: 800;
   letter-spacing: -0.025em;
   line-height: 1.2;
+}
+
+h1 {
+  font-size: clamp(2rem, 3.4vw, 2.75rem);
+}
+
+.search-panel h2 {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
 }
 
 label {
@@ -627,6 +596,11 @@ button:disabled, input:disabled {
 }
 
 @media (max-width: 767px) {
+  .site-header {
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+  }
   .movie-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 12px;
@@ -672,8 +646,6 @@ button:disabled, input:disabled {
   .movie-title,
   .new-search-button,
   .retry-button,
-  .brand,
-  .brand-mark,
   .rules-toggle,
   .rules-content,
   .site-footer a {
@@ -681,9 +653,6 @@ button:disabled, input:disabled {
     transition: none;
   }
   .rules-content {
-    transform: none;
-  }
-  .brand:hover {
     transform: none;
   }
 }

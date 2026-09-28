@@ -20,6 +20,38 @@ public sealed class EnrichmentV2Tests
     }
 
     [TestMethod]
+    public void EnrichmentArguments_ValidatesGlobalAttemptCapAndKeepsDefault()
+    {
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var required = new[] { "--input-jsonl", Path.Combine(root, "in.jsonl"), "--input-manifest", Path.Combine(root, "manifest.json"),
+            "--ml32m-root", root, "--cache-dir", Path.Combine(root, "cache"), "--output-dir", Path.Combine(root, "out") };
+        Assert.AreEqual(10_000, EnrichmentV2Arguments.Parse(required).MaxHttpAttempts);
+        Assert.AreEqual(6_000, EnrichmentV2Arguments.Parse([.. required, "--max-http-attempts", "6000"]).MaxHttpAttempts);
+        foreach (var value in new[] { "0", "-1", "10001", "x" })
+            Assert.ThrowsExactly<ArgumentException>(() => EnrichmentV2Arguments.Parse([.. required, "--max-http-attempts", value]));
+        Assert.ThrowsExactly<ArgumentException>(() => EnrichmentV2Arguments.Parse([.. required, "--max-http-attempts", "6000", "--max-http-attempts", "5000"]));
+        Assert.ThrowsExactly<ArgumentException>(() => EnrichmentV2Arguments.Parse([.. required, "--max-http-attempts"]));
+    }
+
+    [TestMethod]
+    public async Task EnrichmentArguments_ConfiguredAttemptCapReachesHttpTransport()
+    {
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var options = EnrichmentV2Arguments.Parse(["--input-jsonl", Path.Combine(root, "in.jsonl"), "--input-manifest", Path.Combine(root, "manifest.json"),
+            "--ml32m-root", root, "--cache-dir", Path.Combine(root, "cache"), "--output-dir", Path.Combine(root, "out"), "--max-http-attempts", "2"]);
+        using var guard = new TmdbAttemptGuard(options.MaxHttpAttempts);
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+        using var http = new HttpClient(handler);
+        var client = new TmdbDetailsClient(http, "fake-token", (_, _) => Task.CompletedTask, guard);
+
+        await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => client.GetAsync(42, CancellationToken.None));
+
+        Assert.AreEqual(2, handler.Requests.Count);
+        Assert.AreEqual(2, guard.AttemptCount);
+        Assert.AreEqual("attempt_cap", guard.StopReason);
+    }
+
+    [TestMethod]
     public void Ratings_StreamsExactSelectedCountsSumsAndValidZero()
     {
         var path = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"), "ratings.csv");
@@ -165,23 +197,31 @@ public sealed class EnrichmentV2Tests
         var directory = Path.Combine(Path.GetTempPath(), "CineKros.Etl.Tests", Guid.NewGuid().ToString("N"));
         var cache = new Dictionary<int, TmdbDetails>();
         using var cancellation = new CancellationTokenSource();
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var saved = new ManualResetEventSlim();
+        var fetchedAfterCancellation = 0;
         try
         {
-            var running = EnrichmentV2Runner.FetchPendingAsync([11, 12], cache, directory, 1, async (id, token) =>
+            var running = EnrichmentV2Runner.FetchPendingAsync([11, 12], cache, directory, 2, (id, _) =>
             {
-                if (id == 11)
+                if (cancellation.IsCancellationRequested) Interlocked.Increment(ref fetchedAfterCancellation);
+                return Task.FromResult(new TmdbDetails(null, null, null, true));
+            }, cancellation.Token,
+                afterCacheMove: id => { if (id == 11) saved.Set(); },
+                afterGateAcquired: id =>
                 {
-                    entered.SetResult();
-                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
-                }
-                return new TmdbDetails(null, null, null, true);
-            }, cancellation.Token);
-            await entered.Task;
-            cancellation.Cancel();
+                    if (id == 12)
+                    {
+                        saved.Wait();
+                        cancellation.Cancel();
+                    }
+                });
             await Assert.ThrowsAsync<OperationCanceledException>(() => running);
-            CollectionAssert.AreEqual(new[] { 11, 12 }, JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json"))).RootElement.GetProperty("nonterminalFailureIds").EnumerateArray().Select(x => x.GetInt32()).ToArray());
-            Assert.AreEqual(0, cache.Count);
+            CollectionAssert.AreEqual(new[] { 12 }, JsonDocument.Parse(File.ReadAllBytes(Path.Combine(directory, "checkpoint-v2.json"))).RootElement.GetProperty("nonterminalFailureIds").EnumerateArray().Select(x => x.GetInt32()).ToArray());
+            Assert.AreEqual(0, fetchedAfterCancellation);
+            Assert.IsTrue(File.Exists(Path.Combine(directory, "11.json")));
+            Assert.IsFalse(File.Exists(Path.Combine(directory, "12.json")));
+            Assert.AreEqual(1, cache.Count);
+            Assert.IsTrue(cache.ContainsKey(11));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }
@@ -232,6 +272,33 @@ public sealed class EnrichmentV2Tests
         Assert.AreEqual(101, details.RuntimeMinutes);
         Assert.AreEqual("en", details.OriginalLanguage);
         Assert.AreEqual("/poster.jpg", details.PosterPath);
+    }
+
+    [TestMethod]
+    public async Task TmdbDetails_NormalizesRuntimeZeroButStillRejectsNegativeAndNonnumericValues()
+    {
+        var zero = new RecordingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"id\":42,\"runtime\":0,\"original_language\":\"en\",\"poster_path\":\"/poster.jpg\"}")
+        });
+        using (var client = new HttpClient(zero))
+        {
+            var details = await new TmdbDetailsClient(client, "fake-token").GetAsync(42, CancellationToken.None);
+            Assert.IsNull(details.RuntimeMinutes);
+            Assert.AreEqual("en", details.OriginalLanguage);
+            Assert.AreEqual("/poster.jpg", details.PosterPath);
+        }
+
+        foreach (var runtime in new[] { "-1", "\"0\"" })
+        {
+            var invalid = new RecordingHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent($"{{\"id\":42,\"runtime\":{runtime}}}")
+            });
+            using var client = new HttpClient(invalid);
+            var exception = await Assert.ThrowsExactlyAsync<TmdbRequestException>(() => new TmdbDetailsClient(client, "fake-token").GetAsync(42, CancellationToken.None));
+            Assert.AreEqual("invalid_response", exception.FailureClass);
+        }
     }
 
     [TestMethod]

@@ -1,0 +1,9 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/etl/CineKros.VectorImporter/CineKros.VectorImporter.csproj" />
+    <ProjectReference Include="../../src/etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj" />
+  </ItemGroup>
+</Project>

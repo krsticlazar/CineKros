@@ -6,6 +6,6 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../database/etl/CineKros.Etl/CineKros.Etl.csproj" />
+    <ProjectReference Include="../../src/etl/CineKros.Etl/CineKros.Etl.csproj" />
   </ItemGroup>
 </Project>
