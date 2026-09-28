@@ -147,6 +147,24 @@ describe('v2 recommendation frontend', () => {
     if (count < 10) expect(notice).toBeInTheDocument(); else expect(notice).not.toBeInTheDocument()
   })
 
+  it.each([
+    { locale: 'sr', toggle: 'Pošalji', label: 'Upit: Želim mračan SF film posle 2015. godine' },
+    { locale: 'en', toggle: 'Send', label: 'Query: I want a dark psychological thriller' },
+  ])('shows the original submitted query in $locale above movie results', async ({ locale, toggle, label }) => {
+    const pending = deferred<RecommendationResponse>()
+    const user = userEvent.setup()
+    render(<App submit={() => pending.promise} />)
+    if (locale === 'en') await user.click(screen.getByRole('button', { name: 'EN' }))
+    const prompt = locale === 'en' ? 'I want a dark psychological thriller' : 'Želim mračan SF film posle 2015. godine'
+    await user.type(screen.getByRole('textbox'), prompt)
+    await user.click(screen.getByRole('button', { name: toggle }))
+    expect(screen.queryByText(label)).not.toBeInTheDocument()
+    pending.resolve(response(1))
+    const queryLabel = await screen.findByText(label)
+    const movieGrid = screen.getByRole('region', { name: locale === 'en' ? 'AI-Powered Film Search' : 'VI-Pretraga filmova' })
+    expect(queryLabel.compareDocumentPosition(movieGrid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it.each([0, 11])('rejects invalid movie count %s as a generic technical response', async (count) => {
     const user = userEvent.setup(); render(<App submit={() => Promise.resolve(response(count))} />); await user.type(screen.getByRole('textbox'), 'film'); await user.click(screen.getByRole('button', { name: 'Pošalji' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Došlo je do greške.')

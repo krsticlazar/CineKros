@@ -38,6 +38,23 @@ public sealed class RealProviderAdapterTests
     }
 
     [TestMethod]
+    public async Task ParseAsyncAndEvidencePathUseSameValidatedResultAndSingleFakeProviderResponse()
+    {
+        var response = ParserEnvelope(QueryJson(semantic: "quiet mystery"));
+        using var client = new HttpClient(new FakeHandler((_, _) => Task.FromResult(JsonResponse(response))));
+        var parser = new GeminiRealQueryParser(client, "unused-test-key", "fixed instruction", ReadSchema(), new RealParsedQueryValidator());
+        var ordinary = await parser.ParseAsync("en", "quiet mystery", CancellationToken.None);
+        var evidence = await parser.ParseWithEvidenceAsync("en", "quiet mystery", CancellationToken.None);
+        Assert.AreEqual(ordinary.Type, evidence.Result.Type);
+        Assert.AreEqual(ordinary.Query!.HardFilters, evidence.Result.Query!.HardFilters);
+        Assert.AreEqual(ordinary.Query.SemanticQuery, evidence.Result.Query.SemanticQuery);
+        using var checklist = JsonDocument.Parse(evidence.ProviderChecklistJson);
+        Assert.AreEqual("query", checklist.RootElement.GetProperty("type").GetString());
+        Assert.AreEqual("absent", checklist.RootElement.GetProperty("year").GetProperty("status").GetString());
+        Assert.IsTrue(evidence.ProviderDuration >= TimeSpan.Zero);
+    }
+
+    [TestMethod]
     public async Task DevelopmentLogsValidatedChecklistEvidenceWhileProductionDoesNot()
     {
         const string providerDto = """
@@ -282,6 +299,67 @@ public sealed class RealProviderAdapterTests
             var error = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(client, "hidden", "prompt", ReadSchema(), new RealParsedQueryValidator()).ParseAsync("en", "quiet", CancellationToken.None));
             Assert.AreEqual("PARSER_INVALID_RESPONSE", error.Code);
         }
+    }
+
+    [TestMethod]
+    public async Task DevelopmentDiagnosticsClassifyProviderFailuresWithoutLeakingProviderData()
+    {
+        foreach (var status in new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.TooManyRequests, HttpStatusCode.InternalServerError, HttpStatusCode.ServiceUnavailable })
+        {
+            var logger = new RecordingLogger();
+            using var client = new HttpClient(new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("provider-body-secret") })));
+            var error = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(client, "private-key-secret", "prompt", ReadSchema(), new RealParsedQueryValidator(), logger, isDevelopment: true).ParseAsync("en", "private-query-secret", CancellationToken.None));
+            Assert.AreEqual("PROVIDER_UNAVAILABLE", error.Code);
+            Assert.AreEqual(1, logger.Messages.Count);
+            StringAssert.Contains(logger.Messages[0], "Gemini HTTP/parser");
+            StringAssert.Contains(logger.Messages[0], $"HTTP status {(int)status}");
+            AssertNoSecrets(logger.Messages[0]);
+        }
+
+        var productionLogger = new RecordingLogger();
+        using var productionClient = new HttpClient(new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("provider-body-secret") })));
+        _ = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(productionClient, "private-key-secret", "prompt", ReadSchema(), new RealParsedQueryValidator(), productionLogger, isDevelopment: false).ParseAsync("en", "private-query-secret", CancellationToken.None));
+        Assert.AreEqual(0, productionLogger.Messages.Count);
+    }
+
+    [TestMethod]
+    public async Task DevelopmentDiagnosticsClassifyTimeoutNetworkAndMalformedParserResponses()
+    {
+        var timeoutLogger = new RecordingLogger();
+        using (var timeoutClient = new HttpClient(new FakeHandler((_, _) => throw new TaskCanceledException("timeout-secret"))))
+        {
+            var error = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(timeoutClient, "hidden", "prompt", ReadSchema(), new RealParsedQueryValidator(), timeoutLogger, isDevelopment: true).ParseAsync("en", "quiet", CancellationToken.None));
+            Assert.AreEqual("PROVIDER_UNAVAILABLE", error.Code);
+        }
+        StringAssert.Contains(timeoutLogger.Messages.Single(), "cause=timeout");
+        AssertNoSecrets(timeoutLogger.Messages.Single());
+
+        var networkLogger = new RecordingLogger();
+        using (var networkClient = new HttpClient(new FakeHandler((_, _) => throw new HttpRequestException("network-secret"))))
+        {
+            var error = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(networkClient, "hidden", "prompt", ReadSchema(), new RealParsedQueryValidator(), networkLogger, isDevelopment: true).ParseAsync("en", "quiet", CancellationToken.None));
+            Assert.AreEqual("PROVIDER_UNAVAILABLE", error.Code);
+        }
+        StringAssert.Contains(networkLogger.Messages.Single(), "cause=network exception HttpRequestException");
+        AssertNoSecrets(networkLogger.Messages.Single());
+
+        var malformedLogger = new RecordingLogger();
+        using (var malformedClient = new HttpClient(new FakeHandler((_, _) => Task.FromResult(JsonResponse("provider-body-secret")))))
+        {
+            var error = await AssertThrowsAsync<RealProviderException>(() => new GeminiRealQueryParser(malformedClient, "hidden", "prompt", ReadSchema(), new RealParsedQueryValidator(), malformedLogger, isDevelopment: true).ParseAsync("en", "quiet", CancellationToken.None));
+            Assert.AreEqual("PARSER_INVALID_RESPONSE", error.Code);
+        }
+        StringAssert.Contains(malformedLogger.Messages.Single(), "cause=malformed response/validation");
+        AssertNoSecrets(malformedLogger.Messages.Single());
+    }
+
+    private static void AssertNoSecrets(string message)
+    {
+        Assert.IsFalse(message.Contains("provider-body-secret", StringComparison.Ordinal));
+        Assert.IsFalse(message.Contains("private-key-secret", StringComparison.Ordinal));
+        Assert.IsFalse(message.Contains("private-query-secret", StringComparison.Ordinal));
+        Assert.IsFalse(message.Contains("timeout-secret", StringComparison.Ordinal));
+        Assert.IsFalse(message.Contains("network-secret", StringComparison.Ordinal));
     }
 
     private static string QueryJson(string? semantic) => "{\"type\":\"query\",\"query\":{" + QueryBody(semantic) + "},\"alertCode\":null}";

@@ -9,6 +9,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/embedding/CineKros.Embedding/CineKros.Embedding.csproj" />
+    <Project Path="src/evaluation/CineKros.Evaluation/CineKros.Evaluation.csproj" />
   </Folder>
   <Folder Name="/src/backend/">
     <Project Path="src/backend/CineKros.Api/CineKros.Api.csproj" />
@@ -17,6 +18,7 @@
     <Project Path="tests/CineKros.Embedding.Tests/CineKros.Embedding.Tests.csproj" />
     <Project Path="tests/CineKros.E5.Generator.Tests/CineKros.E5.Generator.Tests.csproj" />
     <Project Path="tests/CineKros.Api.Tests/CineKros.Api.Tests.csproj" />
+    <Project Path="tests/CineKros.Evaluation.Tests/CineKros.Evaluation.Tests.csproj" />
     <Project Path="tests/CineKros.Etl.Tests/CineKros.Etl.Tests.csproj" />
     <Project Path="tests/CineKros.Importer.Tests/CineKros.Importer.Tests.csproj" />
     <Project Path="tests/CineKros.VectorImporter.Tests/CineKros.VectorImporter.Tests.csproj" />

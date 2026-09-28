@@ -10,7 +10,11 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
     public const string Model = "gemini-3.1-flash-lite";
     private static readonly Uri BaseUri = new("https://generativelanguage.googleapis.com/v1beta/models/", UriKind.Absolute);
 
-    public async Task<RealParserResult> ParseAsync(string language, string message, CancellationToken cancellationToken)
+    public async Task<RealParserResult> ParseAsync(string language, string message, CancellationToken cancellationToken) =>
+        (await ParseWithEvidenceAsync(language, message, cancellationToken)).Result;
+
+    /// <summary>Runs the same parser path while returning only validated checklist evidence for offline evaluation.</summary>
+    public async Task<GeminiParserEvidenceResult> ParseWithEvidenceAsync(string language, string message, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
@@ -25,9 +29,15 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
             };
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"{BaseUri}{Model}:generateContent", UriKind.Absolute)) { Content = JsonContent.Create(body) };
             request.Headers.TryAddWithoutValidation("x-goog-api-key", apiKey);
+            var providerTimer = System.Diagnostics.Stopwatch.StartNew();
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            if (!response.IsSuccessStatusCode) throw new RealProviderException("PROVIDER_UNAVAILABLE");
+            if (!response.IsSuccessStatusCode)
+            {
+                LogDevelopmentFailure($"HTTP status {(int)response.StatusCode}");
+                throw new RealProviderException("PROVIDER_UNAVAILABLE");
+            }
             var providerJson = await response.Content.ReadAsStringAsync(timeout.Token);
+            providerTimer.Stop();
             var structuredText = ExtractText(providerJson);
             var parsed = validator.Validate(structuredText, out var checklistEvidence);
             if (isDevelopment)
@@ -36,14 +46,40 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
                 if (parsed.Query is not null)
                     logger?.LogInformation("Validated parser DTO (Development): {CanonicalQuery}", JsonSerializer.Serialize(parsed.Query.HardFilters, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
             }
-            return parsed;
+            return new GeminiParserEvidenceResult(parsed, checklistEvidence, providerTimer.Elapsed);
         }
-        catch (RealProviderException) { throw; }
+        catch (RealProviderException ex)
+        {
+            if (ex.Code == "PARSER_INVALID_RESPONSE") LogDevelopmentFailure("malformed response/validation");
+            throw;
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (OperationCanceledException) { throw new RealProviderException("PROVIDER_UNAVAILABLE"); }
-        catch (JsonException) { throw new RealProviderException("PARSER_INVALID_RESPONSE"); }
-        catch (HttpRequestException) { throw new RealProviderException("PROVIDER_UNAVAILABLE"); }
-        catch (Exception) { throw new RealProviderException("PROVIDER_UNAVAILABLE"); }
+        catch (OperationCanceledException)
+        {
+            LogDevelopmentFailure("timeout");
+            throw new RealProviderException("PROVIDER_UNAVAILABLE");
+        }
+        catch (JsonException)
+        {
+            LogDevelopmentFailure("malformed response/validation");
+            throw new RealProviderException("PARSER_INVALID_RESPONSE");
+        }
+        catch (HttpRequestException)
+        {
+            LogDevelopmentFailure("network exception HttpRequestException");
+            throw new RealProviderException("PROVIDER_UNAVAILABLE");
+        }
+        catch (Exception)
+        {
+            LogDevelopmentFailure("other sanitized adapter failure");
+            throw new RealProviderException("PROVIDER_UNAVAILABLE");
+        }
+    }
+
+    private void LogDevelopmentFailure(string cause)
+    {
+        if (isDevelopment)
+            logger?.LogWarning("Gemini HTTP/parser Development diagnostic: cause={Cause}", cause);
     }
 
     private static string ExtractText(string json)
@@ -55,3 +91,5 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
         return text.GetString()!;
     }
 }
+
+public sealed record GeminiParserEvidenceResult(RealParserResult Result, string ProviderChecklistJson, TimeSpan ProviderDuration);

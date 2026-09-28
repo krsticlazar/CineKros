@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "phase-d-proposed-v1",
+  "cases": [
+    {
+      "id": "Q001",
+      "language": "en",
+      "query": "science fiction from 2000 onward",
+      "category": "hybrid",
+      "note": "tiny schema fixture",
+      "parserEval": false,
+      "retrievalEval": true,
+      "parserExpected": null,
+      "retrievalQuery": {
+        "hardFilters": { "yearMin": 2000 },
+        "semanticQuery": "science fiction"
+      },
+      "applicableModes": [ "hybrid", "structured", "semantic" ],
+      "expectedNoResults": false
+    }
+  ]
+}

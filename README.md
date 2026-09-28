@@ -1,5 +1,7 @@
 # CineKros
 
+AI-powered movie recommendation system combining natural-language query parsing, SQL hard filters, and E5 + pgvector semantic search.
+
 ![CineKros logo](src/frontend/src/assets/CineKros_logo.svg)
 
 CineKros is a bachelor's thesis project by Lazar Krstić: a local hybrid movie search application. The React, TypeScript and Vite frontend sends a query to an ASP.NET Core API. Gemini `gemini-3.1-flash-lite` is used solely to parse queries into structured search intent; it does not select movies. PostgreSQL applies mandatory SQL hard filters, then exact pgvector cosine similarity ranks only eligible results.
