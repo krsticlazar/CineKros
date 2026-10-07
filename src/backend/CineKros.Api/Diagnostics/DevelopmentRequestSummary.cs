@@ -10,11 +10,10 @@ public static class DevelopmentRequestSummary
     {
         var parserJson = JsonSerializer.Serialize(validatedParserResult, new JsonSerializerOptions
         {
-            WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         });
-        return $"Recommendation request (Development)\nQuery: {originalQuery}\nValidated parser DTO:\n{parserJson}\nDuration: {durationMs} ms\nCode: {code}";
+        return $"Recommendation request (Development)\nQuery: {originalQuery}\nValidated parser DTO: {parserJson}\nDuration: {durationMs} ms\nCode: {code}";
     }
 
     public static void WriteIfDevelopment(bool isDevelopment, string originalQuery, RealParserResult validatedParserResult, long durationMs, string code)

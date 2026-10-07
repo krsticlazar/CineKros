@@ -18,6 +18,7 @@ internal sealed record RealEmbeddingOptions(
 
 internal sealed record RealEmbeddingRunResult(int RecordCount, int Generated, int Reused, int Failed, int Attempts, long InputBytes, long InputTokens, string OutputSha256);
 
+// Historical Gemini embedding implementation retained for reproducibility; the CLI is disabled.
 internal static class RealDocumentEmbeddingRunner
 {
     internal const string CatalogVersion = "B05a-combined-catalog-v1";

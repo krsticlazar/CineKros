@@ -1,19 +1,21 @@
-# CineKros evaluation harness
+# CineKros.Evaluation
 
-This local CLI reads a proposed Phase D query set and writes JSON and Markdown reports to the caller-selected output base path. It does not load `.env`, alter production search behavior, or write to the catalog.
+## Uloga
 
-Retrieval mode requires process environment variables `DATABASE_CONNECTION_STRING` and `CINEKROS_E5_MODEL_DIR`:
+Samostalni CLI za ponovljive, istraživačke provere parsera i retrieval-a; nije deo web zahteva. Čita unapred definisane slučajeve i zapisuje JSON i Markdown izveštaj. Sam izveštaj niti prisustvo opcionih ljudskih ocena ne predstavlja završenu akademsku evaluaciju: metodologija, uzorak i analiza moraju biti posebno utvrđeni.
 
-```powershell
-dotnet run --project src/evaluation/CineKros.Evaluation -- --mode retrieval --queries .local/planning/evaluation/proposed_queries_v1.json --case-ids Q001,Q003 --output .local/planning/runs/retrieval-01
-```
+## Dva režima
 
-Optional human judgments are a JSON object keyed by query ID, then MovieLens ID, with integer scores from 0 to 3, for example `{"Q001":{"1":3,"2":1}}`. They remain nullable per returned movie until every result for that case is judged.
+- `retrieval` proverava strukturisanu, semantičku i hibridnu pretragu nad lokalnom bazom uz E5 query vektor. Zahteva eksplicitne ID-jeve slučajeva, dostupnu bazu/model i odgovarajuće podatke. Ovo je tehničko merenje trenutnog toka.
+- `parser` poredi Gemini izlaz sa očekivanim checklist/DTO vrednostima. CLI zahteva `--live-parser` i `--max-live-calls`; to su stvarni provider pozivi, ne suvi probni režim.
 
-Parser mode is a separate explicit live operation. It requires `--live-parser --max-live-calls N`, a positive cap no larger than the parser-evaluable case count, and process-only `GEMINI_API_KEY`:
+`CliOptions.Parse` u [Program.cs](Program.cs) proverava CLI argumente, izbor slučajeva, izlazne putanje i eksplicitno odobrenje live parser poziva.
 
-```powershell
-dotnet run --project src/evaluation/CineKros.Evaluation -- --mode parser --queries .local/planning/evaluation/proposed_queries_v1.json --output .local/planning/runs/parser-01 --live-parser --max-live-calls 1
-```
+## Kako čitati kod
 
-Parser mode records validated checklist and canonical hard-field comparisons; semantic-query literal equality is exploratory. Failures are stored as sanitized alert codes and are not counted as retrieval failures. Neither mode chooses a default output path.
+- [EvaluationModels.cs](EvaluationModels.cs) opisuje slučajeve, očekivane rezultate i izveštaj.
+- [EvaluationLogic.cs](EvaluationLogic.cs) validira query set, proverava hard-filter usklađenost i računa metrike samo kada postoje potrebne ljudske ocene.
+- [EvaluationRunner.cs](EvaluationRunner.cs) izvršava retrieval slučajeve preko `MovieSearchRepository` i [CineKros.Embedding](../../embedding/CineKros.Embedding/README.md); `EvaluationReports.Write` čuva izlaze.
+- `Program` bira režim i sastavlja rezultate. Parser putanja poziva Gemini samo uz eksplicitne CLI zastavice.
+
+Ovaj alat daje dokaz o ponašanju konkretnog skupa slučajeva i konfiguracije. Ne zamenjuje planiranu akademsku evaluaciju, ljudsko ocenjivanje niti zaključke o opštoj kvaliteti sistema.

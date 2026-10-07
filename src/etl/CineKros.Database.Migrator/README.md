@@ -1,10 +1,22 @@
-# CineKros database migrator
+# CineKros.Database.Migrator
 
-Run numbered SQL migrations in filename order using the PostgreSQL connection in the process environment variable `DATABASE_CONNECTION_STRING`:
+## Uloga
+
+CLI primenjuje uređene, verzionisane SQL migracije na već postojeću PostgreSQL bazu. Ne kreira niti pokreće samu bazu. Connection string čita iz `DATABASE_CONNECTION_STRING`.
+
+## Mesto u toku
+
+`PostgreSQL → Database.Migrator → schema → [Catalog.Importer](../CineKros.Catalog.Importer/README.md) → [VectorImporter](../CineKros.VectorImporter/README.md) → API`
+
+Migracioni SQL nalazi se u [`database/migrations`](../../../database/migrations). Iz korena repozitorijuma, uz podešenu konekciju, stvarna komanda je:
 
 ```powershell
-$env:DATABASE_CONNECTION_STRING = '<connection string supplied by the caller>'
-dotnet run --project src/etl/CineKros.Database.Migrator/CineKros.Database.Migrator.csproj -- database/migrations
+dotnet run --project src/etl/CineKros.Database.Migrator -- database/migrations
 ```
 
-Each migration runs in a transaction and is recorded by SHA-256 in `schema_migrations`. A repeat verifies the recorded checksum without rerunning SQL; a changed migration with an existing version stops. The runner does not create a database, read `.env`, or print connection details. It can target local PostgreSQL or a compatible PostgreSQL service by changing only the caller-provided connection string.
+## Kako čitati kod
+
+- [Program.cs](Program.cs) sortira `.sql` fajlove po imenu, ograničava paralelno izvršavanje advisory lock-om i pokreće svaku novu migraciju u transakciji.
+- Evidencija `schema_migrations` čuva verziju i SHA-256. Ponovljeno pokretanje proverava checksum; promenjena ranije primenjena migracija zaustavlja tok.
+
+Migrator čini promene šeme sledljivim pre nego što importer-i upišu podatke.

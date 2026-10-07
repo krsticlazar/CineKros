@@ -12,7 +12,7 @@ const response = (count: number): RecommendationResponse => ({ type: 'movies', m
 const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((next, fail) => { resolve = next; reject = fail }); return { promise, resolve, reject } }
 
 describe('v2 recommendation frontend', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
   it('starts in Serbian and switches locale with pressed state', async () => {
     const user = userEvent.setup(); render(<App submit={vi.fn(() => Promise.resolve(response(10)))} />)
@@ -145,6 +145,23 @@ describe('v2 recommendation frontend', () => {
     expect(screen.getAllByRole('link', { name: /Otvori Film/ })[0]).toHaveClass('movie-card')
     const notice = screen.queryByText('Prikazani su svi pronađeni filmovi koji ispunjavaju uslove.')
     if (count < 10) expect(notice).toBeInTheDocument(); else expect(notice).not.toBeInTheDocument()
+  })
+
+  it('uses the configured absolute API origin in the real HTTP submit path', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com/')
+    const fetchMock = vi.fn().mockResolvedValue({ status: 200, json: () => Promise.resolve(response(10)) }); vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup(); render(<App />); await user.type(screen.getByRole('textbox'), 'quiet mystery'); await user.click(screen.getByRole('button', { name: 'Pošalji' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.example.com/api/recommendations')
+    await screen.findByRole('link', { name: 'Otvori Film 1 na IMDb-u' })
+  })
+
+  it('rejects invalid configured origin through the generic error path without fetching', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com/path')
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup(); render(<App />); await user.type(screen.getByRole('textbox'), 'quiet mystery'); await user.click(screen.getByRole('button', { name: 'Pošalji' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Došlo je do greške. Probaj ponovo.')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it.each([

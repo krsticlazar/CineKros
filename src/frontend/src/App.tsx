@@ -4,7 +4,9 @@ import type { BusinessAlertCode, Locale, Movie, SearchRequest, Submit, Technical
 import { NeuralNetworkCanvas } from './NeuralNetworkCanvas'
 import { LanguageToggle } from './LanguageToggle'
 import logoUrl from './assets/CineKros_logo.svg'
+import logoStrokeUrl from './assets/CineKros_logo_stroke.svg'
 import cameraUrl from './assets/film-camera.svg'
+import { recommendationEndpoint } from './apiConfiguration'
 
 const copy = {
   sr: { subtitle: 'VI-Pretraga filmova', label: 'Opiši kakve filmove tražiš', queryLabel: 'Upit:', submit: 'Pošalji', loading: 'Tražimo filmove…', fallback: 'Poster nije dostupan', open: (title: string) => `Otvori ${title} na IMDb-u`, partial: 'Prikazani su svi pronađeni filmovi koji ispunjavaju uslove.', retry: 'Pokušaj ponovo', newSearch: 'Nova pretraga', rulesClosed: '↓ Pravila i Ograničenja ↓', rulesOpen: '↑ Pravila i Ograničenja ↑', limitations: ['Katalog je ograničen na 9.730 filmova iz istraživačkog skupa podataka i ne predstavlja kompletnu bazu svih filmova.', 'Katalog se ne ažurira u realnom vremenu, pa nova filmska izdanja mogu nedostajati.', 'Preporuke se zasnivaju na dostupnim metapodacima, Tag Genome oznakama i semantičkoj sličnosti. Sistem ne analizira sam video-sadržaj filma.', 'Strogi kriterijumi navedeni u upitu primenjuju se kao obavezni filteri. Ako nijedan film ne ispunjava sve uslove, rezultat može biti prazan.', 'Po jednom upitu prikazuje se najviše 10 preporučenih filmova.', 'Za pojedine filmove mogu nedostajati spoljni metapodaci, kao što su trajanje, originalni jezik ili poster.', 'Trenutna verzija ne koristi korisnički profil, istoriju gledanja niti višekružni razgovor za personalizaciju preporuka.', 'Ocene i podaci o popularnosti potiču iz MovieLens skupa podataka i ne moraju odgovarati trenutnim ocenama na drugim filmskim servisima.', 'MovieLens ocene su na skali od 1 do 5. Ako unesete ocenu veću od 5, sistem je deli sa 2 i koristi tako prilagođen prag za pretragu.'], footerBefore: '© 2026 CineKros. Sva prava zadržana. CineKros je ', footerAfter: ' projekat.', errors: { RATE_LIMITED: 'Trenutno ima previše zahteva. Probaj malo kasnije.', PARSER_INVALID_RESPONSE: 'Nismo uspeli da obradimo odgovor servisa. Probaj ponovo.', PROVIDER_UNAVAILABLE: 'Servis trenutno nije dostupan. Probaj kasnije.', SEARCH_UNAVAILABLE: 'Pretraga trenutno nije dostupna. Probaj kasnije.', INTERNAL_ERROR: 'Došlo je do greške. Probaj ponovo.' } },
@@ -16,7 +18,8 @@ function errorMessage(code: string, locale: Locale) {
 }
 
 async function submitHttp(request: SearchRequest, signal: AbortSignal): Promise<{ status: number; body: unknown }> {
-  const response = await fetch('/api/recommendations', {
+  const endpoint = recommendationEndpoint(import.meta.env.VITE_API_BASE_URL, import.meta.env.DEV)
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -73,7 +76,7 @@ function MovieCard({ movie, locale, index }: { movie: Movie; locale: Locale; ind
     <a className="movie-card" style={{ animationDelay: `${Math.min(index, 9) * 45}ms` }} href={movie.imdbUrl} target="_blank" rel="noopener noreferrer" aria-label={copy[locale].open(movie.title)}>
       <div className="poster-frame">
         {!failed && <img src={movie.posterUrl ?? undefined} alt="" onError={() => setFailed(true)} />}
-        {failed && <div className="poster-fallback"><img src={logoUrl} alt="" /><span>{copy[locale].fallback}</span></div>}
+        {failed && <div className="poster-fallback"><img src={logoStrokeUrl} alt="" /><span>{copy[locale].fallback}</span></div>}
         <span className="movie-title">{movie.title}{movie.year === null ? '' : ` (${movie.year})`}</span>
       </div>
     </a>

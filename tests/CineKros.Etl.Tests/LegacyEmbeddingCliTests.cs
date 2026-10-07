@@ -9,7 +9,7 @@ public sealed class LegacyEmbeddingCliTests
     [TestMethod]
     public async Task RealEmbed_RejectsAsSupersededBeforeCredentialOrHttpSetup()
     {
-        var assemblyPath = typeof(RealEmbeddingCliArguments).Assembly.Location;
+        var assemblyPath = typeof(MetadataExporter).Assembly.Location;
         var start = new ProcessStartInfo("dotnet")
         {
             RedirectStandardError = true,

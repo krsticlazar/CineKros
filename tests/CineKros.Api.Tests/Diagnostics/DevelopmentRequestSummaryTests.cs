@@ -15,9 +15,11 @@ public sealed class DevelopmentRequestSummaryTests
         var output = DevelopmentRequestSummary.Format("film posle 2010", parsed, 42, "SUCCESS");
 
         StringAssert.Contains(output, "Query: film posle 2010");
-        StringAssert.Contains(output, "Validated parser DTO:");
-        StringAssert.Contains(output, "\"yearMin\": 2011");
-        StringAssert.Contains(output, "\"semanticQuery\": \"quiet mystery\"");
+        StringAssert.Contains(output, "Validated parser DTO: {");
+        StringAssert.Contains(output, "\"yearMin\":2011");
+        StringAssert.Contains(output, "\"semanticQuery\":\"quiet mystery\"");
+        var dtoLine = output.Split('\n').Single(line => line.StartsWith("Validated parser DTO:", StringComparison.Ordinal));
+        Assert.IsTrue(dtoLine.EndsWith('}'), "The canonical DTO must fit on one console line.");
         Assert.IsFalse(output.Contains("alertCode", StringComparison.Ordinal));
         StringAssert.Contains(output, "Duration: 42 ms");
         StringAssert.Contains(output, "Code: SUCCESS");
@@ -38,7 +40,7 @@ public sealed class DevelopmentRequestSummaryTests
 
             DevelopmentRequestSummary.WriteIfDevelopment(true, "original dev query", parsed, 12, "QUERY_UNCLEAR");
             StringAssert.Contains(output.ToString(), "original dev query");
-            StringAssert.Contains(output.ToString(), "\"alertCode\": \"QUERY_UNCLEAR\"");
+            StringAssert.Contains(output.ToString(), "\"alertCode\":\"QUERY_UNCLEAR\"");
             Assert.IsFalse(output.ToString().Contains("query\":", StringComparison.Ordinal));
             StringAssert.Contains(output.ToString(), "Duration: 12 ms");
             StringAssert.Contains(output.ToString(), "Code: QUERY_UNCLEAR");

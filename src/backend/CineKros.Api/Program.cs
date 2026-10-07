@@ -7,6 +7,7 @@ using System.Threading.RateLimiting;
 var builder = WebApplication.CreateBuilder(args);
 var recommendationMode = RecommendationStartup.ResolveMode(builder.Environment);
 RecommendationStartup.RegisterServices(builder.Services, recommendationMode);
+ProductionHttpConfiguration.AddRecommendationCors(builder.Services, builder.Configuration, builder.Environment);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -19,6 +20,7 @@ builder.Services.AddRateLimiter(options =>
 var app = builder.Build();
 if (recommendationMode == "real")
     _ = app.Services.GetRequiredService<E5EmbeddingModel>();
+app.UseCors(ProductionHttpConfiguration.RecommendationCorsPolicy);
 app.UseRateLimiter();
 if (recommendationMode == "real")
     app.MapPost("/api/recommendations", RealRecommendationEndpoint.HandleAsync).RequireRateLimiting("recommendations");

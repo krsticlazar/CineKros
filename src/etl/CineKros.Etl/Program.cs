@@ -1,5 +1,4 @@
 using CineKros.Etl;
-using System.Security.Cryptography;
 
 try
 {
@@ -114,9 +113,4 @@ catch (OperationCanceledException)
 {
     Console.Error.WriteLine("ERROR: ETL operation cancelled.");
     return 130;
-}
-catch (Exception exception) when (args.Length > 0 && args[0] == "real-embed")
-{
-    Console.Error.WriteLine($"ERROR: Real embedding stopped safely ({exception.GetType().Name}).");
-    return 1;
 }
