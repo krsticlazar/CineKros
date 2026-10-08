@@ -459,6 +459,7 @@
         "dependencies": {
           "CineKros.Catalog.Importer": "[1.0.0, )",
           "CineKros.Embedding": "[1.0.0, )",
+          "CineKros.TextNormalization": "[1.0.0, )",
           "Npgsql": "[10.0.3, )",
           "Pgvector": "[0.3.2, )"
         }
@@ -477,6 +478,9 @@
           "Tokenizers.DotNet.runtime.linux-x64": "[1.4.1, )",
           "Tokenizers.DotNet.runtime.win-x64": "[1.4.1, )"
         }
+      },
+      "cinekros.textnormalization": {
+        "type": "Project"
       }
     }
   }

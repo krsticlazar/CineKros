@@ -1,11 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using CineKros.Api.Search;
 
 namespace CineKros.Api.RealProviders;
 
 /// <summary>Gemini structured-output adapter. It is intentionally not registered by the fake API host.</summary>
-public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, string systemInstruction, string responseSchema, RealParsedQueryValidator validator, ILogger<GeminiRealQueryParser>? logger = null, bool isDevelopment = false)
+public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, string systemInstruction, string responseSchema, RealParsedQueryValidator validator, ILogger<GeminiRealQueryParser>? logger = null, bool isDevelopment = false, bool languageAware = false)
 {
     public const string Model = "gemini-3.1-flash-lite";
     private static readonly Uri BaseUri = new("https://generativelanguage.googleapis.com/v1beta/models/", UriKind.Absolute);
@@ -39,7 +40,10 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
             var providerJson = await response.Content.ReadAsStringAsync(timeout.Token);
             providerTimer.Stop();
             var structuredText = ExtractText(providerJson);
-            var parsed = validator.Validate(structuredText, out var checklistEvidence);
+            string checklistEvidence;
+            var parsed = languageAware
+                ? validator.ValidateV5(structuredText, ParseSelectedLanguage(language), out checklistEvidence)
+                : validator.Validate(structuredText, out checklistEvidence);
             if (isDevelopment)
             {
                 logger?.LogInformation("Validated Gemini provider checklist (Development): {ProviderChecklistEvidence}", checklistEvidence);
@@ -75,6 +79,13 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
             throw new RealProviderException("PROVIDER_UNAVAILABLE");
         }
     }
+
+    private static SearchLanguage ParseSelectedLanguage(string language) => language switch
+    {
+        "en" => SearchLanguage.English,
+        "sr" => SearchLanguage.Serbian,
+        _ => throw new RealProviderException("PARSER_INVALID_RESPONSE")
+    };
 
     private void LogDevelopmentFailure(string cause)
     {

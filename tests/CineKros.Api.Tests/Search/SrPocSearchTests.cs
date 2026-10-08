@@ -35,6 +35,7 @@ public sealed class SrPocSearchTests
                 "sr" => SearchLanguage.Serbian,
                 _ => throw new InvalidDataException("Unexpected fixed probe language.")
             };
+            await repository.EnsureSelectedLanguageReadyAsync(language);
             var probes = languageBlock.GetProperty("vectors").EnumerateArray().ToArray();
             Assert.AreEqual(4, probes.Length);
             foreach (var probe in probes)
@@ -129,6 +130,8 @@ public sealed class SrPocSearchTests
                 await command.ExecuteNonQueryAsync();
             var unavailable = await Assert.ThrowsExactlyAsync<RealProviderException>(() => repository.SearchHybridAsync(new RealHardFilters(), enSentinel, SearchLanguage.Serbian));
             Assert.AreEqual("SEARCH_UNAVAILABLE", unavailable.Code);
+            var preflightUnavailable = await Assert.ThrowsExactlyAsync<RealProviderException>(() => repository.EnsureSelectedLanguageReadyAsync(SearchLanguage.Serbian));
+            Assert.AreEqual("SEARCH_UNAVAILABLE", preflightUnavailable.Code);
             Assert.AreEqual(enId, (await repository.SearchHybridAsync(new RealHardFilters(), enSentinel, SearchLanguage.English))[0].MovieLensId);
             CollectionAssert.AreEqual(new[] { enId }, (await repository.SearchHardOnlyAsync(new RealHardFilters(YearMin: 1900, YearMax: 1900,
                 RuntimeMin: 100, RuntimeMax: 100, Genres: new RealGenreFilter(All: ["Drama"], Any: ["Thriller"]),

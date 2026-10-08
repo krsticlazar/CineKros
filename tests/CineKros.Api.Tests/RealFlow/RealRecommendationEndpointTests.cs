@@ -5,6 +5,7 @@ using CineKros.Api;
 using CineKros.Api.Database;
 using CineKros.Api.RealFlow;
 using CineKros.Api.RealProviders;
+using CineKros.Api.Search;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
@@ -72,11 +73,49 @@ public sealed class RealRecommendationEndpointTests
         Assert.AreEqual(0, search.TotalCalls);
     }
 
-    private static async Task<WebApplication> BuildApp(EndpointParser parser, EndpointEmbedding embedding, EndpointSearch search)
+    [TestMethod]
+    public async Task InvalidSelectedLanguageIsRejectedBeforeParser()
+    {
+        var parser = new EndpointParser();
+        var embedding = new EndpointEmbedding();
+        var search = new EndpointSearch([]);
+        await using var app = await BuildApp(parser, embedding, search);
+        using var client = app.GetTestClient();
+        using var response = await client.PostAsync("/api/recommendations", new StringContent("{\"language\":\"fr\",\"message\":\"un film\"}", Encoding.UTF8, "application/json"));
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.AreEqual("INVALID_REQUEST", json.RootElement.GetProperty("alert").GetProperty("code").GetString());
+        Assert.AreEqual(0, parser.Calls);
+        Assert.AreEqual(0, embedding.Calls);
+        Assert.AreEqual(0, search.TotalCalls);
+    }
+
+    [TestMethod]
+    public async Task LanguageMismatchUses422LocalizedAlertAndStopsBeforeRetrieval()
+    {
+        var parser = new EndpointParser(new RealParserResult("alert", AlertCode: ApiErrorCodes.LanguageMismatch, LanguageCheck: "mismatch"));
+        var embedding = new EndpointEmbedding();
+        var search = new EndpointSearch([]);
+        await using var app = await BuildApp(parser, embedding, search, languageAwarePoc: true);
+        using var client = app.GetTestClient();
+        using var response = await Post(client, "en", "Un film calme");
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.AreEqual((HttpStatusCode)422, response.StatusCode);
+        Assert.AreEqual("LANGUAGE_MISMATCH", json.RootElement.GetProperty("alert").GetProperty("code").GetString());
+        Assert.AreEqual("The query is not in the selected language. Change the language or rephrase your query.", json.RootElement.GetProperty("alert").GetProperty("message").GetString());
+        Assert.AreEqual(1, parser.Calls);
+        Assert.AreEqual(0, embedding.Calls);
+        Assert.AreEqual(0, search.PreflightCalls);
+        Assert.AreEqual(0, search.TotalCalls);
+    }
+
+    private static async Task<WebApplication> BuildApp(EndpointParser parser, EndpointEmbedding embedding, EndpointSearch search, bool languageAwarePoc = false)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddSingleton(new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search));
+        builder.Services.AddSingleton(new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc));
         var app = builder.Build();
         app.Run(async context =>
         {
@@ -96,14 +135,14 @@ public sealed class RealRecommendationEndpointTests
 
     private static Task<HttpResponseMessage> Post(HttpClient client, string language, string message) => client.PostAsync("/api/recommendations", new StringContent(JsonSerializer.Serialize(new { language, message }), Encoding.UTF8, "application/json"));
 
-    private sealed class EndpointParser : IRealQueryParser
+    private sealed class EndpointParser(RealParserResult? result = null) : IRealQueryParser
     {
         public int Calls { get; private set; }
         public Task<RealParserResult> ParseAsync(string language, string message, CancellationToken cancellationToken)
         {
             Calls++;
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(YearMin: 2000), "quiet mystery")));
+            return Task.FromResult(result ?? new RealParserResult("query", new RealParsedQuery(new RealHardFilters(YearMin: 2000), "quiet mystery")));
         }
     }
 
@@ -123,10 +162,24 @@ public sealed class RealRecommendationEndpointTests
     private sealed class EndpointSearch(IReadOnlyList<FilteredMovie> results) : IRealMovieSearch
     {
         public int HybridCalls { get; private set; }
-        public int TotalCalls => HybridCalls;
+        public int PreflightCalls { get; private set; }
+        public int LanguageHybridCalls { get; private set; }
+        public int TotalCalls => HybridCalls + LanguageHybridCalls;
         public Task<IReadOnlyList<FilteredMovie>> SearchHybridAsync(RealHardFilters hardFilters, float[] queryVector, CancellationToken cancellationToken)
         {
             HybridCalls++;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(results);
+        }
+        public Task EnsureSelectedLanguageReadyAsync(SearchLanguage language, CancellationToken cancellationToken)
+        {
+            PreflightCalls++;
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+        public Task<IReadOnlyList<FilteredMovie>> SearchHybridAsync(RealHardFilters hardFilters, float[] queryVector, SearchLanguage language, CancellationToken cancellationToken)
+        {
+            LanguageHybridCalls++;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(results);
         }

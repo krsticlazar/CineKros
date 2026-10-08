@@ -67,6 +67,9 @@
           "Tokenizers.DotNet.runtime.linux-x64": "[1.4.1, )",
           "Tokenizers.DotNet.runtime.win-x64": "[1.4.1, )"
         }
+      },
+      "cinekros.textnormalization": {
+        "type": "Project"
       }
     }
   }

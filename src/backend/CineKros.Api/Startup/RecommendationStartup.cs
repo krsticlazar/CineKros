@@ -25,7 +25,12 @@ public static class RecommendationStartup
     }
 
     public static void RegisterServices(IServiceCollection services, string mode)
+        => RegisterServices(services, mode, serbianPoc: false);
+
+    public static void RegisterServices(IServiceCollection services, string mode, bool serbianPoc)
     {
+        if (serbianPoc && mode != "real")
+            throw new InvalidOperationException("CINEKROS_SERBIAN_POC=true requires real recommendation mode.");
         if (mode == "fake")
         {
             services.AddSingleton(new MovieQueryPrompt(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Prompts", "movie-query-parser.md"))));
@@ -34,38 +39,75 @@ public static class RecommendationStartup
             return;
         }
 
-        RegisterRealServices(services);
+        RegisterRealServices(services, serbianPoc);
     }
 
-    private static void RegisterRealServices(IServiceCollection services)
+    public static bool ResolveSerbianPocMode(IHostEnvironment environment, string mode) =>
+        ResolveSerbianPocMode(environment, mode, Environment.GetEnvironmentVariable("CINEKROS_SERBIAN_POC"));
+
+    public static bool ResolveSerbianPocMode(IHostEnvironment environment, string mode, string? flag)
+    {
+        if (flag is null || flag == "false") return false;
+        if (flag != "true")
+            throw new InvalidOperationException("CINEKROS_SERBIAN_POC must be true or false.");
+        if (!environment.IsDevelopment())
+            throw new InvalidOperationException("CINEKROS_SERBIAN_POC=true is permitted only in Development.");
+        if (mode != "real")
+            throw new InvalidOperationException("CINEKROS_SERBIAN_POC=true requires real recommendation mode.");
+        return true;
+    }
+
+    public static void ValidatePocDatabaseTarget(string? configuredDatabase)
+    {
+        if (configuredDatabase != "cinekros_sr_poc_phase04_20261008")
+            throw new InvalidOperationException("The Serbian POC database connection must target the exact retained Phase 4 database.");
+    }
+
+    private static void ValidatePocConnectionString(string connectionString)
+    {
+        string? database;
+        try { database = new NpgsqlConnectionStringBuilder(connectionString).Database; }
+        catch { throw new InvalidOperationException("The Serbian POC database connection string is invalid."); }
+        ValidatePocDatabaseTarget(database);
+    }
+
+    private static void RegisterRealServices(IServiceCollection services, bool serbianPoc)
     {
         var connectionString = Environment.GetEnvironmentVariable("DATABASE_CONNECTION_STRING");
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
         var modelDirectory = Environment.GetEnvironmentVariable("CINEKROS_E5_MODEL_DIR");
         if (string.IsNullOrWhiteSpace(connectionString) || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(modelDirectory))
             throw new InvalidOperationException("Real recommendation mode requires DATABASE_CONNECTION_STRING, GEMINI_API_KEY, and CINEKROS_E5_MODEL_DIR in the process environment.");
+        if (serbianPoc) ValidatePocConnectionString(connectionString);
 
         var artifactDirectory = Path.Combine(AppContext.BaseDirectory, "RealProviders");
-        var systemInstruction = File.ReadAllText(Path.Combine(artifactDirectory, "query-parser-v4.md"));
-        var responseSchema = File.ReadAllText(Path.Combine(artifactDirectory, "query-parser.schema.json"));
+        var promptName = serbianPoc ? "query-parser-v5.md" : "query-parser-v4.md";
+        var schemaName = serbianPoc ? "query-parser-v5.schema.json" : "query-parser.schema.json";
+        var systemInstruction = File.ReadAllText(Path.Combine(artifactDirectory, promptName));
+        var responseSchema = File.ReadAllText(Path.Combine(artifactDirectory, schemaName));
         services.AddSingleton(new RealParsedQueryValidator());
         services.AddSingleton(_ => new HttpClient());
-        services.AddSingleton(sp => new GeminiRealQueryParser(sp.GetRequiredService<HttpClient>(), apiKey, systemInstruction, responseSchema, sp.GetRequiredService<RealParsedQueryValidator>(), sp.GetRequiredService<ILogger<GeminiRealQueryParser>>(), sp.GetRequiredService<IHostEnvironment>().IsDevelopment()));
+        services.AddSingleton(sp => new GeminiRealQueryParser(sp.GetRequiredService<HttpClient>(), apiKey, systemInstruction, responseSchema, sp.GetRequiredService<RealParsedQueryValidator>(), sp.GetRequiredService<ILogger<GeminiRealQueryParser>>(), sp.GetRequiredService<IHostEnvironment>().IsDevelopment(), serbianPoc));
         services.AddSingleton<IRealQueryParser, GeminiQueryParserAdapter>();
-        services.AddSingleton(sp => LoadE5Model(modelDirectory));
+        var embeddingProfile = serbianPoc ? EmbeddingProfileDescriptor.MultilingualE5Base : EmbeddingProfileDescriptor.LegacyEnglish;
+        services.AddSingleton(sp => LoadE5Model(modelDirectory, embeddingProfile));
         services.AddSingleton<IRealQueryEmbeddingProvider, E5QueryEmbeddingAdapter>();
         services.AddSingleton<NpgsqlDataSource>(_ => MovieSearchRepository.CreateDataSource(connectionString));
-        services.AddSingleton(sp => new MovieSearchRepository(sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<E5EmbeddingModel>().ProfileFingerprint));
+        if (serbianPoc)
+            services.AddSingleton(sp => MovieSearchRepository.CreatePocRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
+        else
+            services.AddSingleton(sp => new MovieSearchRepository(sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<E5EmbeddingModel>().ProfileFingerprint));
         services.AddSingleton<IRealMovieSearch, MovieSearchAdapter>();
-        services.AddSingleton<RealRecommendationService>();
+        services.AddSingleton(sp => new RealRecommendationService(sp.GetRequiredService<IRealQueryParser>(), sp.GetRequiredService<RealParsedQueryValidator>(),
+            sp.GetRequiredService<IRealQueryEmbeddingProvider>(), sp.GetRequiredService<IRealMovieSearch>(), serbianPoc));
     }
 
-    private static E5EmbeddingModel LoadE5Model(string modelDirectory)
+    private static E5EmbeddingModel LoadE5Model(string modelDirectory, EmbeddingProfileDescriptor expectedProfile)
     {
         try
         {
-            var model = new E5EmbeddingModel(modelDirectory);
-            if (model.ProfileFingerprint != "9411a2620fc30e348aa80c9d4e54ca0db5a00d94a92175c82ccdd47ad03b13e1")
+            var model = new E5EmbeddingModel(modelDirectory, expectedProfile);
+            if (model.ProfileFingerprint != expectedProfile.ProfileFingerprint)
             {
                 model.Dispose();
                 throw new InvalidDataException();

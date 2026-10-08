@@ -15,7 +15,7 @@ public static class RecommendationEndpoint
     private static readonly HashSet<string> Genres = new(StringComparer.Ordinal) { "Action", "Adventure", "Animation", "Children", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "IMAX", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western" };
     private static readonly Dictionary<string, int> Statuses = new(StringComparer.Ordinal)
     {
-        [ApiErrorCodes.InvalidRequest] = 400, [ApiErrorCodes.QueryUnclear] = 422, [ApiErrorCodes.NotMovieRequest] = 422,
+        [ApiErrorCodes.InvalidRequest] = 400, [ApiErrorCodes.QueryUnclear] = 422, [ApiErrorCodes.LanguageMismatch] = 422, [ApiErrorCodes.NotMovieRequest] = 422,
         [ApiErrorCodes.UnsupportedRequest] = 422, [ApiErrorCodes.NoResults] = 200, [ApiErrorCodes.RateLimited] = 429,
         [ApiErrorCodes.ParserInvalidResponse] = 502, [ApiErrorCodes.ProviderUnavailable] = 503,
         [ApiErrorCodes.SearchUnavailable] = 503, [ApiErrorCodes.InternalError] = 500,
@@ -24,6 +24,7 @@ public static class RecommendationEndpoint
     {
         [ApiErrorCodes.InvalidRequest] = ("Unesi ispravan zahtev za filmove.", "Enter a valid movie request."),
         [ApiErrorCodes.QueryUnclear] = ("Napiši malo jasnije kakav film tražiš.", "Describe the movie you want more clearly."),
+        [ApiErrorCodes.LanguageMismatch] = ("Upit nije na izabranom jeziku. Promenite jezik ili preformulišite upit.", "The query is not in the selected language. Change the language or rephrase your query."),
         [ApiErrorCodes.NotMovieRequest] = ("Napiši zahtev za preporuku filma.", "Enter a movie recommendation request."),
         [ApiErrorCodes.UnsupportedRequest] = ("Jedan obavezan uslov trenutno ne možemo pouzdano da proverimo. Izmeni upit.", "We cannot reliably check one required condition yet. Please revise your request."),
         [ApiErrorCodes.NoResults] = ("Nema filmova koji ispunjavaju sve obavezne uslove.", "No movies meet all the required conditions."),

@@ -118,6 +118,8 @@ public sealed class MovieSearchRepositoryTests
     {
         await using var unavailableDataSource = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=unused;Username=unused;Password=unused;Timeout=1");
         var repository = new MovieSearchRepository(unavailableDataSource, ProfileFingerprint);
+        var preflight = await Assert.ThrowsExactlyAsync<RealProviderException>(() => repository.EnsureSelectedLanguageReadyAsync(SearchLanguage.English));
+        Assert.AreEqual("SEARCH_UNAVAILABLE", preflight.Code);
         await AssertProviderUnavailableAsync(() => repository.SearchHybridAsync(new RealHardFilters(), []));
         await AssertProviderUnavailableAsync(() => repository.SearchHybridAsync(new RealHardFilters(), new float[767]));
         await AssertProviderUnavailableAsync(() => repository.SearchHybridAsync(new RealHardFilters(), new float[768]));

@@ -14,11 +14,14 @@
   <ItemGroup>
     <ProjectReference Include="../../embedding/CineKros.Embedding/CineKros.Embedding.csproj" />
     <ProjectReference Include="../../etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj" />
+    <ProjectReference Include="../../shared/CineKros.TextNormalization/CineKros.TextNormalization.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Prompts/movie-query-parser.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="RealProviders/query-parser-v4.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="RealProviders/query-parser.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser-v5.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser-v5.schema.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

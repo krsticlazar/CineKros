@@ -6,7 +6,8 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 var recommendationMode = RecommendationStartup.ResolveMode(builder.Environment);
-RecommendationStartup.RegisterServices(builder.Services, recommendationMode);
+var serbianPocMode = RecommendationStartup.ResolveSerbianPocMode(builder.Environment, recommendationMode);
+RecommendationStartup.RegisterServices(builder.Services, recommendationMode, serbianPocMode);
 ProductionHttpConfiguration.AddRecommendationCors(builder.Services, builder.Configuration, builder.Environment);
 builder.Services.AddRateLimiter(options =>
 {

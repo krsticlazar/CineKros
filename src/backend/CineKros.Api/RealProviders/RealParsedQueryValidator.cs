@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using CineKros.Api.Database;
+using CineKros.Api.Search;
 
 namespace CineKros.Api.RealProviders;
 
@@ -103,6 +104,93 @@ public sealed class RealParsedQueryValidator
             if (!HasActiveFilter(filters)) Invalid();
         }
         else if (!string.Equals(semantic, semantic.Trim(), StringComparison.Ordinal) || semantic.Length == 0 || semantic.Any(char.IsControl) || !semantic.EnumerateRunes().Any(Rune.IsLetterOrDigit)) Invalid();
+    }
+
+    /// <summary>Validates the strict v5 envelope and its language branch, then applies the unchanged v4 checklist rules.</summary>
+    public RealParserResult ValidateV5(string json, SearchLanguage selectedLanguage, out string evidence)
+    {
+        evidence = string.Empty;
+        if (selectedLanguage is not (SearchLanguage.English or SearchLanguage.Serbian)) Invalid();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = ReadFields(doc.RootElement, "type", "languageCheck", "query", "alertCode");
+            RequireOnly(root, "type", "languageCheck", "query", "alertCode");
+            var type = RequiredString(root, "type");
+            var languageCheck = RequiredString(root, "languageCheck");
+            if (languageCheck is not ("match" or "mismatch" or "unclear")) Invalid();
+
+            var queryValue = Required(root, "query");
+            var alertValue = Required(root, "alertCode");
+            RealParserResult result = null!;
+            string checklist = string.Empty;
+            if (type == "query")
+            {
+                if (languageCheck != "match" || alertValue.ValueKind != JsonValueKind.Null) Invalid();
+                var legacyJson = JsonSerializer.Serialize(new { type, query = queryValue, alertCode = (string?)null });
+                result = Validate(legacyJson, out checklist);
+                result = result with { LanguageCheck = languageCheck };
+            }
+            else if (type == "alert")
+            {
+                if (queryValue.ValueKind != JsonValueKind.Null) Invalid();
+                var alertCode = RequiredString(root, "alertCode");
+                if (languageCheck == "mismatch")
+                {
+                    if (alertCode != "LANGUAGE_MISMATCH") Invalid();
+                }
+                else if (languageCheck == "unclear")
+                {
+                    if (alertCode != "QUERY_UNCLEAR") Invalid();
+                }
+                else if (!AlertCodes.Contains(alertCode)) Invalid();
+
+                if (languageCheck is "mismatch" or "unclear")
+                {
+                    result = new RealParserResult("alert", AlertCode: alertCode, LanguageCheck: languageCheck);
+                    checklist = JsonSerializer.Serialize(new { type = "alert", alertCode });
+                }
+                else
+                {
+                    var legacyJson = JsonSerializer.Serialize(new { type, query = (object?)null, alertCode });
+                    result = Validate(legacyJson, out checklist) with { LanguageCheck = languageCheck };
+                }
+            }
+            else Invalid();
+
+            using var checklistDocument = JsonDocument.Parse(checklist);
+            evidence = JsonSerializer.Serialize(new
+            {
+                languageCheck,
+                checklist = checklistDocument.RootElement.Clone()
+            });
+            return result;
+        }
+        catch (RealProviderException) { throw; }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException or FormatException or OverflowException)
+        {
+            throw new RealProviderException("PARSER_INVALID_RESPONSE");
+        }
+    }
+
+    public RealParserResult ValidateV5(string json, SearchLanguage selectedLanguage) => ValidateV5(json, selectedLanguage, out _);
+
+    /// <summary>Rechecks injected v5 DTOs at the orchestration boundary.</summary>
+    public void ValidateResultV5(RealParserResult? result, SearchLanguage selectedLanguage)
+    {
+        if (selectedLanguage is not (SearchLanguage.English or SearchLanguage.Serbian) || result is null) Invalid();
+        switch (result.LanguageCheck)
+        {
+            case "match":
+                ValidateResult(result);
+                return;
+            case "mismatch" when result.Type == "alert" && result.Query is null && result.AlertCode == "LANGUAGE_MISMATCH":
+            case "unclear" when result.Type == "alert" && result.Query is null && result.AlertCode == "QUERY_UNCLEAR":
+                return;
+            default:
+                Invalid();
+                return;
+        }
     }
 
     public static bool HasActiveFilter(RealHardFilters f) => f.YearMin is not null || f.YearMax is not null || f.RuntimeMin is not null || f.RuntimeMax is not null || f.Genres is not null || f.RatingMin is not null || f.OriginalLanguage is not null;

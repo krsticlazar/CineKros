@@ -1,5 +1,5 @@
 {
-  "contract": "v2.0.0",
+  "contract": "v2.1.0",
   "retired": "Unindexed v1 fixtures in this directory are historical only; active cases below explicitly cover the v2 contract.",
   "cases": [
     {"file":"request-v2-invalid-old.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
@@ -10,6 +10,11 @@
     {"file":"request-v2-invalid-language.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
     {"file":"response-v2-invalid-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":400,"expectedCode":"INVALID_REQUEST","language":"en"},
     {"file":"response-v2-unclear-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"QUERY_UNCLEAR","language":"sr"},
+    {"file":"response-v2-language-mismatch-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"LANGUAGE_MISMATCH","language":"sr"},
+    {"file":"response-v2-language-mismatch-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"LANGUAGE_MISMATCH","language":"en"},
+    {"file":"response-v2-invalid-language-mismatch-status.json","schema":"alert","schemaValid":true,"contractValid":false,"httpStatus":400,"expectedCode":"LANGUAGE_MISMATCH","language":"sr","statusValid":false},
+    {"file":"response-v2-invalid-language-mismatch-message.json","schema":"alert","schemaValid":true,"contractValid":false,"httpStatus":422,"expectedCode":"LANGUAGE_MISMATCH","language":"sr","statusValid":true},
+    {"file":"response-v2-invalid-language-mismatch-code.json","schema":"alert","schemaValid":false,"contractValid":false,"httpStatus":null,"expectedCode":"UNKNOWN_ERROR","language":"sr","statusValid":false},
     {"file":"response-v2-not-movie-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"NOT_MOVIE_REQUEST","language":"en"},
     {"file":"response-v2-unsupported-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"UNSUPPORTED_REQUEST","language":"sr"},
     {"file":"response-v2-no-results-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCode":"NO_RESULTS","language":"en"},

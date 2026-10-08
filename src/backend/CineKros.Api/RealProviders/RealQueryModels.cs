@@ -12,7 +12,7 @@ public sealed record RealHardFilters(
 
 public sealed record RealGenreFilter(IReadOnlyList<string>? All = null, IReadOnlyList<string>? Any = null);
 public sealed record RealParsedQuery(RealHardFilters HardFilters, string? SemanticQuery);
-public sealed record RealParserResult(string Type, RealParsedQuery? Query = null, string? AlertCode = null);
+public sealed record RealParserResult(string Type, RealParsedQuery? Query = null, string? AlertCode = null, string? LanguageCheck = null);
 
 public sealed class RealProviderException(string code) : Exception(code)
 {

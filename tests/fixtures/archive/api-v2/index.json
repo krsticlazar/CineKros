@@ -1,0 +1,32 @@
+{
+  "contract": "v2.0.0",
+  "retired": "Unindexed v1 fixtures in this directory are historical only; active cases below explicitly cover the v2 contract.",
+  "cases": [
+    {"file":"request-v2-invalid-old.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"request-v2-valid-en.json","schema":"request","schemaValid":true,"contractValid":true,"httpStatus":null},
+    {"file":"request-v2-valid-sr.json","schema":"request","schemaValid":true,"contractValid":true,"httpStatus":null},
+    {"file":"request-v2-invalid-missing-language.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"request-v2-invalid-extra.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"request-v2-invalid-language.json","schema":"request","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-invalid-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":400,"expectedCode":"INVALID_REQUEST","language":"en"},
+    {"file":"response-v2-unclear-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"QUERY_UNCLEAR","language":"sr"},
+    {"file":"response-v2-not-movie-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"NOT_MOVIE_REQUEST","language":"en"},
+    {"file":"response-v2-unsupported-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":422,"expectedCode":"UNSUPPORTED_REQUEST","language":"sr"},
+    {"file":"response-v2-no-results-en.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCode":"NO_RESULTS","language":"en"},
+    {"file":"response-v2-no-results-sr.json","schema":"alert","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCode":"NO_RESULTS","language":"sr"},
+    {"file":"response-v2-invalid-alert.json","schema":"alert","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-movies-one.json","schema":"movies","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCount":1,"expectedPartial":true},
+    {"file":"response-v2-movies-nine.json","schema":"movies","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCount":9,"expectedPartial":true},
+    {"file":"response-v2-movies-ten.json","schema":"movies","schemaValid":true,"contractValid":true,"httpStatus":200,"expectedCount":10,"expectedPartial":false},
+    {"file":"response-v2-invalid-zero-movies.json","schema":"movies","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-invalid-eleven-movies.json","schema":"movies","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-invalid-missing-poster.json","schema":"movies","schemaValid":false,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-invalid-duplicate-movies.json","schema":"movies","schemaValid":true,"contractValid":false,"httpStatus":null},
+    {"file":"response-v2-rate-limited.json","schema":"technical","schemaValid":true,"contractValid":true,"httpStatus":429,"expectedCode":"RATE_LIMITED"},
+    {"file":"response-v2-parser-invalid.json","schema":"technical","schemaValid":true,"contractValid":true,"httpStatus":502,"expectedCode":"PARSER_INVALID_RESPONSE"},
+    {"file":"response-v2-provider-unavailable.json","schema":"technical","schemaValid":true,"contractValid":true,"httpStatus":503,"expectedCode":"PROVIDER_UNAVAILABLE"},
+    {"file":"response-v2-search-unavailable.json","schema":"technical","schemaValid":true,"contractValid":true,"httpStatus":503,"expectedCode":"SEARCH_UNAVAILABLE"},
+    {"file":"response-v2-internal-error.json","schema":"technical","schemaValid":true,"contractValid":true,"httpStatus":500,"expectedCode":"INTERNAL_ERROR"},
+    {"file":"response-v2-invalid-technical.json","schema":"technical","schemaValid":false,"contractValid":false,"httpStatus":null}
+  ]
+}

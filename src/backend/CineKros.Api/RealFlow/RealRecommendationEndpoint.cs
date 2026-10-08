@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CineKros.Api.Database;
 using CineKros.Api.Diagnostics;
 using CineKros.Api.RealProviders;
+using CineKros.Api.Search;
 
 namespace CineKros.Api.RealFlow;
 
@@ -25,10 +26,20 @@ public static class RealRecommendationEndpoint
             originalQuery = attempt.Request.Message;
 
             RealRecommendationResult result;
-            try { result = await service.RecommendAsync(attempt.Request, context.RequestAborted); }
+            try
+            {
+                result = service.LanguageAwarePoc
+                    ? await service.RecommendAsync(new RealRecommendationRequest(attempt.Request, MapSelectedLanguage(attempt.Request.Language)), context.RequestAborted)
+                    : await service.RecommendAsync(attempt.Request, context.RequestAborted);
+            }
             catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { throw; }
             catch (RealProviderException ex)
             {
+                if (ex.Code == ApiErrorCodes.InvalidRequest)
+                {
+                    code = ApiErrorCodes.InvalidRequest;
+                    return RecommendationEndpoint.Alert(code, attempt.Request.Language, StatusCodes.Status400BadRequest);
+                }
                 code = AllowedTechnicalCode(ex.Code);
                 return RecommendationEndpoint.Technical(code);
             }
@@ -42,7 +53,7 @@ public static class RealRecommendationEndpoint
             {
                 validatedParserResult = result.ParsedResult;
                 code = result.AlertCode;
-                return RecommendationEndpoint.Alert(code, attempt.Request.Language, code == ApiErrorCodes.NoResults ? StatusCodes.Status200OK : code == ApiErrorCodes.QueryUnclear || code == ApiErrorCodes.NotMovieRequest || code == ApiErrorCodes.UnsupportedRequest ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status500InternalServerError);
+                return RecommendationEndpoint.Alert(code, attempt.Request.Language, code == ApiErrorCodes.NoResults ? StatusCodes.Status200OK : code == ApiErrorCodes.QueryUnclear || code == ApiErrorCodes.LanguageMismatch || code == ApiErrorCodes.NotMovieRequest || code == ApiErrorCodes.UnsupportedRequest ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status500InternalServerError);
             }
             if (result.Movies.Count == 0)
             {
@@ -78,6 +89,13 @@ public static class RealRecommendationEndpoint
     }
 
     private static string AllowedTechnicalCode(string code) => code is ApiErrorCodes.ParserInvalidResponse or ApiErrorCodes.ProviderUnavailable or ApiErrorCodes.SearchUnavailable ? code : ApiErrorCodes.InternalError;
+
+    private static SearchLanguage MapSelectedLanguage(string language) => language switch
+    {
+        "en" => SearchLanguage.English,
+        "sr" => SearchLanguage.Serbian,
+        _ => throw new RealProviderException(ApiErrorCodes.ParserInvalidResponse)
+    };
 
     private static bool IsImdbDigits(string value) => value.Length is >= 1 and <= 12 && value.All(character => character is >= '0' and <= '9');
 

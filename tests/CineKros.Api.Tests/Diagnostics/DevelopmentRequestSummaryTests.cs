@@ -84,6 +84,7 @@ public sealed class DevelopmentRequestSummaryTests
         DevelopmentRequestSummary.LogCompletion(logger, true, "trace-dev", 15, "SUCCESS");
         Assert.AreEqual(LogLevel.Debug, logger.Level);
         StringAssert.Contains(logger.Message!, "CorrelationId=trace-dev");
+        StringAssert.Contains(logger.Message!, "ContractVersion=v2.1.0");
         StringAssert.Contains(logger.Message!, "StageDurationMs=15");
 
         DevelopmentRequestSummary.LogCompletion(logger, false, "trace-prod", 16, "SUCCESS");

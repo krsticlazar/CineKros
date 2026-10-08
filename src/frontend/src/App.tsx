@@ -41,6 +41,7 @@ const businessMessages: Record<Locale, Record<BusinessAlertCode, string>> = {
   sr: {
     INVALID_REQUEST: 'Unesi ispravan zahtev za filmove.',
     QUERY_UNCLEAR: 'Napiši malo jasnije kakav film tražiš.',
+    LANGUAGE_MISMATCH: 'Upit nije na izabranom jeziku. Promenite jezik ili preformulišite upit.',
     NOT_MOVIE_REQUEST: 'Napiši zahtev za preporuku filma.',
     UNSUPPORTED_REQUEST: 'Jedan obavezan uslov trenutno ne možemo pouzdano da proverimo. Izmeni upit.',
     NO_RESULTS: 'Nema filmova koji ispunjavaju sve obavezne uslove.',
@@ -48,6 +49,7 @@ const businessMessages: Record<Locale, Record<BusinessAlertCode, string>> = {
   en: {
     INVALID_REQUEST: 'Enter a valid movie request.',
     QUERY_UNCLEAR: 'Describe the movie you want more clearly.',
+    LANGUAGE_MISMATCH: 'The query is not in the selected language. Change the language or rephrase your query.',
     NOT_MOVIE_REQUEST: 'Enter a movie recommendation request.',
     UNSUPPORTED_REQUEST: 'We cannot reliably check one required condition yet. Please revise your request.',
     NO_RESULTS: 'No movies meet all the required conditions.',
@@ -57,6 +59,7 @@ const businessMessages: Record<Locale, Record<BusinessAlertCode, string>> = {
 const businessStatus: Record<BusinessAlertCode, number> = {
   INVALID_REQUEST: 400,
   QUERY_UNCLEAR: 422,
+  LANGUAGE_MISMATCH: 422,
   NOT_MOVIE_REQUEST: 422,
   UNSUPPORTED_REQUEST: 422,
   NO_RESULTS: 200,

@@ -31,8 +31,8 @@ public static class DevelopmentRequestSummary
     public static void LogCompletion(ILogger logger, bool isDevelopment, string correlationId, long durationMs, string code)
     {
         if (isDevelopment)
-            logger.LogDebug("Recommendation request completed. CorrelationId={CorrelationId} ContractVersion=v2.0.0 StageDurationMs={StageDurationMs} Code={Code}", correlationId, durationMs, code);
+            logger.LogDebug("Recommendation request completed. CorrelationId={CorrelationId} ContractVersion=v2.1.0 StageDurationMs={StageDurationMs} Code={Code}", correlationId, durationMs, code);
         else
-            logger.LogInformation("Recommendation request completed. CorrelationId={CorrelationId} ContractVersion=v2.0.0 StageDurationMs={StageDurationMs} Code={Code}", correlationId, durationMs, code);
+            logger.LogInformation("Recommendation request completed. CorrelationId={CorrelationId} ContractVersion=v2.1.0 StageDurationMs={StageDurationMs} Code={Code}", correlationId, durationMs, code);
     }
 }

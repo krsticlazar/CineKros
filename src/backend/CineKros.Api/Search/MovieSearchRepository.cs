@@ -96,6 +96,20 @@ public sealed class MovieSearchRepository
         return await ReadMoviesAsync(command, cancellationToken);
     }
 
+    /// <summary>
+    /// Verifies the selected language's guarded POC catalog and vector set before query embedding.
+    /// This is intentionally unavailable to the legacy production repository.
+    /// </summary>
+    public async Task EnsureSelectedLanguageReadyAsync(
+        SearchLanguage language, CancellationToken cancellationToken = default)
+    {
+        _ = SearchLanguageColumn.For(language);
+        if (_pocExpectation is null) throw SearchUnavailable();
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await EnsurePocLanguageReadyAsync(connection, language, cancellationToken);
+    }
+
     private async Task EnsurePocLanguageReadyAsync(NpgsqlConnection connection, SearchLanguage language, CancellationToken ct)
     {
         var e = _pocExpectation!;

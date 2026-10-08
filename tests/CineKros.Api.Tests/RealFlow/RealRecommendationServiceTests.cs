@@ -2,6 +2,7 @@ using CineKros.Api;
 using CineKros.Api.Database;
 using CineKros.Api.RealFlow;
 using CineKros.Api.RealProviders;
+using CineKros.Api.Search;
 
 namespace CineKros.Api.Tests.RealFlow;
 
@@ -43,6 +44,176 @@ public sealed class RealRecommendationServiceTests
         Assert.AreEqual(1, search.HybridCalls);
         Assert.AreSame(filters, search.ReceivedFilters, "A dropped-filter mutant must fail this exact-filter assertion.");
         Assert.AreEqual(0, search.HardOnlyCalls);
+    }
+
+    [TestMethod]
+    public async Task SerbianPocNormalizesOnlyParsedSemanticQueryAndRoutesSelectedColumn()
+    {
+        var parser = new FakeParser(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), "мрачна драма"), LanguageCheck: "match"));
+        var embedding = new FakeEmbedding();
+        var search = new FakeSearch();
+        var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+        await service.RecommendAsync(new RealRecommendationRequest(new ParserInput("sr", "Hoću film kao Fight Club"), SearchLanguage.Serbian), CancellationToken.None);
+
+        Assert.AreEqual("mračna drama", embedding.ReceivedQuery);
+        Assert.AreEqual(1, search.PreflightCalls);
+        Assert.AreEqual(SearchLanguage.Serbian, search.PreflightLanguage);
+        Assert.AreEqual(1, search.LanguageHybridCalls);
+        Assert.AreEqual(SearchLanguage.Serbian, search.HybridLanguage);
+    }
+
+    [TestMethod]
+    public async Task EnglishPocDoesNotApplySerbianNormalization()
+    {
+        const string semantic = "dark films with Brad Pitt";
+        var parser = new FakeParser(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), semantic), LanguageCheck: "match"));
+        var embedding = new FakeEmbedding();
+        var search = new FakeSearch();
+        var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+        await service.RecommendAsync(new RealRecommendationRequest(new ParserInput("en", "dark films with Brad Pitt"), SearchLanguage.English), CancellationToken.None);
+
+        Assert.AreEqual(semantic, embedding.ReceivedQuery);
+        Assert.AreEqual(1, search.PreflightCalls);
+        Assert.AreEqual(SearchLanguage.English, search.PreflightLanguage);
+        Assert.AreEqual(SearchLanguage.English, search.HybridLanguage);
+    }
+
+    [TestMethod]
+    public async Task TypedPocRequestMustMatchClosedOriginalLanguageBeforeParser()
+    {
+        foreach (var (original, selected) in new[]
+        {
+            ("en", SearchLanguage.Serbian),
+            ("sr", SearchLanguage.English),
+            ("fr", SearchLanguage.English),
+            ("EN", SearchLanguage.English),
+            ("en", (SearchLanguage)99)
+        })
+        {
+            var parser = new FakeParser(Query(new RealHardFilters(), "must not run"));
+            var embedding = new FakeEmbedding();
+            var search = new FakeSearch();
+            var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+            var error = await Assert.ThrowsExactlyAsync<RealProviderException>(() => service.RecommendAsync(
+                new RealRecommendationRequest(new ParserInput(original, "private input"), selected), CancellationToken.None));
+
+            Assert.AreEqual("INVALID_REQUEST", error.Code);
+            Assert.AreEqual(0, parser.Calls);
+            Assert.AreEqual(0, embedding.Calls);
+            Assert.AreEqual(0, search.PreflightCalls);
+            Assert.AreEqual(0, search.TotalCalls);
+        }
+
+        foreach (var request in new RealRecommendationRequest[]
+        {
+            new(null!, SearchLanguage.English),
+            new(new ParserInput("sr", "  "), SearchLanguage.Serbian)
+        })
+        {
+            var parser = new FakeParser(Query(new RealHardFilters(), "must not run"));
+            var embedding = new FakeEmbedding();
+            var search = new FakeSearch();
+            var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+            var error = await Assert.ThrowsExactlyAsync<RealProviderException>(() => service.RecommendAsync(request, CancellationToken.None));
+            Assert.AreEqual("INVALID_REQUEST", error.Code);
+            Assert.AreEqual(0, parser.Calls);
+            Assert.AreEqual(0, embedding.Calls);
+            Assert.AreEqual(0, search.PreflightCalls);
+            Assert.AreEqual(0, search.TotalCalls);
+        }
+    }
+
+    [TestMethod]
+    public async Task LegacyOverloadInPocUsesClosedLanguageMappingAndV5Path()
+    {
+        foreach (var language in new[] { "fr", "EN", "" })
+        {
+            var parser = new FakeParser(Query(new RealHardFilters(), "must not run"));
+            var embedding = new FakeEmbedding();
+            var search = new FakeSearch();
+            var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+            var error = await Assert.ThrowsExactlyAsync<RealProviderException>(() => service.RecommendAsync(new ParserInput(language, "query"), CancellationToken.None));
+            Assert.AreEqual("INVALID_REQUEST", error.Code);
+            Assert.AreEqual(0, parser.Calls);
+            Assert.AreEqual(0, embedding.Calls);
+            Assert.AreEqual(0, search.TotalCalls);
+        }
+
+        var srParser = new FakeParser(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), "мрачна драма"), LanguageCheck: "match"));
+        var srEmbedding = new FakeEmbedding();
+        var srSearch = new FakeSearch();
+        var srService = new RealRecommendationService(srParser, new RealParsedQueryValidator(), srEmbedding, srSearch, languageAwarePoc: true);
+        await srService.RecommendAsync(new ParserInput("sr", "mirna misterija"), CancellationToken.None);
+        Assert.AreEqual("mračna drama", srEmbedding.ReceivedQuery);
+        Assert.AreEqual(1, srSearch.PreflightCalls);
+        Assert.AreEqual(SearchLanguage.Serbian, srSearch.HybridLanguage);
+
+        var enParser = new FakeParser(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), "quiet mystery"), LanguageCheck: "match"));
+        var enSearch = new FakeSearch();
+        await new RealRecommendationService(enParser, new RealParsedQueryValidator(), new FakeEmbedding(), enSearch, languageAwarePoc: true)
+            .RecommendAsync(new ParserInput("en", "quiet mystery"), CancellationToken.None);
+        Assert.AreEqual(SearchLanguage.English, enSearch.HybridLanguage);
+    }
+
+    [TestMethod]
+    public async Task SerbianPocHardOnlySkipsVectorReadinessAndEmbedding()
+    {
+        var filters = new RealHardFilters(YearMin: 2000);
+        var parser = new FakeParser(new RealParserResult("query", new RealParsedQuery(filters, null), LanguageCheck: "match"));
+        var embedding = new FakeEmbedding();
+        var search = new FakeSearch();
+        var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+        await service.RecommendAsync(new RealRecommendationRequest(new ParserInput("sr", "filmovi posle 2000"), SearchLanguage.Serbian), CancellationToken.None);
+
+        Assert.AreEqual(0, search.PreflightCalls);
+        Assert.AreEqual(0, embedding.Calls);
+        Assert.AreEqual(1, search.HardOnlyCalls);
+        Assert.AreEqual(0, search.LanguageHybridCalls);
+        Assert.AreSame(filters, search.ReceivedFilters);
+    }
+
+    [TestMethod]
+    public async Task LanguageMismatchAndUnclearAlertsStopBeforeReadinessEmbeddingAndSql()
+    {
+        foreach (var parsed in new[]
+        {
+            new RealParserResult("alert", AlertCode: ApiErrorCodes.LanguageMismatch, LanguageCheck: "mismatch"),
+            new RealParserResult("alert", AlertCode: ApiErrorCodes.QueryUnclear, LanguageCheck: "unclear")
+        })
+        {
+            var embedding = new FakeEmbedding();
+            var search = new FakeSearch();
+            var service = new RealRecommendationService(new FakeParser(parsed), new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+            var result = await service.RecommendAsync(new RealRecommendationRequest(new ParserInput("en", "un autre film"), SearchLanguage.English), CancellationToken.None);
+
+            Assert.AreEqual(parsed.AlertCode, result.AlertCode);
+            Assert.AreEqual(0, search.PreflightCalls);
+            Assert.AreEqual(0, embedding.Calls);
+            Assert.AreEqual(0, search.TotalCalls);
+        }
+    }
+
+    [TestMethod]
+    public async Task SelectedLanguagePreflightFailureStopsBeforeEmbedding()
+    {
+        var embedding = new FakeEmbedding();
+        var search = new FakeSearch(new RealProviderException("SEARCH_UNAVAILABLE"));
+        var service = new RealRecommendationService(
+            new FakeParser(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), "quiet mystery"), LanguageCheck: "match")),
+            new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+        var error = await Assert.ThrowsExactlyAsync<RealProviderException>(() => service.RecommendAsync(
+            new RealRecommendationRequest(new ParserInput("sr", "mirna misterija"), SearchLanguage.Serbian), CancellationToken.None));
+
+        Assert.AreEqual("SEARCH_UNAVAILABLE", error.Code);
+        Assert.AreEqual(1, search.PreflightCalls);
+        Assert.AreEqual(0, embedding.Calls);
+        Assert.AreEqual(0, search.TotalCalls);
     }
 
     [TestMethod]
@@ -269,17 +440,36 @@ public sealed class RealRecommendationServiceTests
     private sealed class FakeSearch(Exception? failure = null) : IRealMovieSearch
     {
         public int HybridCalls { get; private set; }
+        public int LanguageHybridCalls { get; private set; }
+        public int PreflightCalls { get; private set; }
         public int HardOnlyCalls { get; private set; }
         public int TotalCalls => HybridCalls + HardOnlyCalls;
         public RealHardFilters? ReceivedFilters { get; private set; }
+        public SearchLanguage? HybridLanguage { get; private set; }
+        public SearchLanguage? PreflightLanguage { get; private set; }
         public IReadOnlyList<FilteredMovie> Results { get; init; } = [new(1, "Synthetic Movie", 2000, "0000001", null, null, null)];
 
-        public Task<IReadOnlyList<FilteredMovie>> SearchHybridAsync(RealHardFilters hardFilters, float[] queryVector, CancellationToken cancellationToken) => Search(hardFilters, cancellationToken, hybrid: true);
-        public Task<IReadOnlyList<FilteredMovie>> SearchHardOnlyAsync(RealHardFilters hardFilters, CancellationToken cancellationToken) => Search(hardFilters, cancellationToken, hybrid: false);
-
-        private Task<IReadOnlyList<FilteredMovie>> Search(RealHardFilters filters, CancellationToken token, bool hybrid)
+        public Task<IReadOnlyList<FilteredMovie>> SearchHybridAsync(RealHardFilters hardFilters, float[] queryVector, CancellationToken cancellationToken)
+        { HybridCalls++; return Search(hardFilters, cancellationToken); }
+        public Task EnsureSelectedLanguageReadyAsync(SearchLanguage language, CancellationToken cancellationToken)
         {
-            if (hybrid) HybridCalls++; else HardOnlyCalls++;
+            PreflightCalls++;
+            PreflightLanguage = language;
+            cancellationToken.ThrowIfCancellationRequested();
+            return failure is null ? Task.CompletedTask : Task.FromException(failure);
+        }
+        public Task<IReadOnlyList<FilteredMovie>> SearchHybridAsync(RealHardFilters hardFilters, float[] queryVector, SearchLanguage language, CancellationToken cancellationToken)
+        {
+            LanguageHybridCalls++;
+            HybridCalls++;
+            HybridLanguage = language;
+            return Search(hardFilters, cancellationToken);
+        }
+        public Task<IReadOnlyList<FilteredMovie>> SearchHardOnlyAsync(RealHardFilters hardFilters, CancellationToken cancellationToken)
+        { HardOnlyCalls++; return Search(hardFilters, cancellationToken); }
+
+        private Task<IReadOnlyList<FilteredMovie>> Search(RealHardFilters filters, CancellationToken token)
+        {
             ReceivedFilters = filters;
             token.ThrowIfCancellationRequested();
             return failure is null ? Task.FromResult(Results) : Task.FromException<IReadOnlyList<FilteredMovie>>(failure);

@@ -83,6 +83,7 @@ public static class ApiErrorCodes
 {
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string QueryUnclear = "QUERY_UNCLEAR";
+    public const string LanguageMismatch = "LANGUAGE_MISMATCH";
     public const string NotMovieRequest = "NOT_MOVIE_REQUEST";
     public const string UnsupportedRequest = "UNSUPPORTED_REQUEST";
     public const string NoResults = "NO_RESULTS";
