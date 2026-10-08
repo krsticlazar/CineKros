@@ -17,14 +17,7 @@ TARGET_ID = 36
 MAX_SOURCE_TOKENS = 512
 MAX_NEW_TOKENS = 32
 NUM_BEAMS = 4
-SMOKE_PHRASES = {
-    "dark",
-    "friendship",
-    "camp",
-    "feel-good",
-    "beautiful animation",
-    "psychological mind games",
-}
+MAX_POC_JOBS = 418
 
 
 def _sha256(path: Path) -> str:
@@ -91,11 +84,17 @@ def _validate_job(job: object) -> tuple[str, str, str, str]:
     en, text, target, settings_id = (job.get(key) for key in ("en", "text", "target", "settingsId"))
     if not all(isinstance(value, str) and value for value in (en, text, target, settings_id)):
         raise ValueError("invalid_job_fields")
-    if en not in SMOKE_PHRASES or text != en:
-        raise ValueError("job_outside_frozen_smoke")
+    if text != en:
+        raise ValueError("job_text_must_match_exact_english_key")
     if target != TARGET or settings_id != "marian-do-sample-false-beam4-maxnew32-v1":
         raise ValueError("unsupported_inference_settings")
     return en, text, target, settings_id
+
+
+def _register_job(en: str, seen: set[str]) -> None:
+    if en in seen or len(seen) >= MAX_POC_JOBS:
+        raise ValueError("duplicate_or_over_limit_job")
+    seen.add(en)
 
 
 def _translate(torch, tokenizer, model, en: str, text: str) -> dict[str, object]:
@@ -145,15 +144,11 @@ def main() -> int:
         return 3
 
     seen: set[str] = set()
-    count = 0
     for line in sys.stdin:
         try:
             job = json.loads(line)
             en, text, _, _ = _validate_job(job)
-            if en in seen or count >= 6:
-                raise ValueError("duplicate_or_over_limit_job")
-            seen.add(en)
-            count += 1
+            _register_job(en, seen)
             response = _translate(torch, tokenizer, model, en, text)
         except Exception:
             print("invalid JSONL job received", file=sys.stderr)

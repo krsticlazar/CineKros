@@ -101,6 +101,12 @@
         "contentHash": "8g2KL2LjsXXVywvQb0uWQBANOONVnRf6cTSbON9ar6gIw08oSBY7Z3PJlC8sHbqOVvCr7srrcWiKzb12SUoV2w=="
       },
       "cinekros.etl": {
+        "type": "Project",
+        "dependencies": {
+          "CineKros.TextNormalization": "[1.0.0, )"
+        }
+      },
+      "cinekros.textnormalization": {
         "type": "Project"
       }
     }

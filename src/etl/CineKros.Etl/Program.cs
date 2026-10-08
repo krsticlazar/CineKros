@@ -84,6 +84,27 @@ try
             Console.CancelKeyPress -= cancelHandler;
         }
     }
+    if (args.Length > 0 && args[0] == "sr-poc-select")
+    {
+        var values = SrPocArguments.Parse(args[1..], "--catalog");
+        var selected = SrPocCatalog.Select(values["--catalog"], values["--output-dir"]);
+        Console.WriteLine($"Serbian POC selection complete: {selected.MovieCount} movies, {selected.TagCount} tags, ID hash {selected.IdSetSha256}.");
+        return 0;
+    }
+    if (args.Length > 0 && args[0] == "sr-poc-build")
+    {
+        var values = SrPocArguments.Parse(args[1..], "--catalog", "--dictionary");
+        var built = SrPocCatalog.Build(values["--catalog"], values["--dictionary"], values["--output-dir"]);
+        Console.WriteLine($"Serbian bilingual POC complete: {built.MovieCount} movies, SHA-256 {built.OutputSha256}.");
+        return 0;
+    }
+    if (args.Length > 0 && args[0] == "sr-poc-context")
+    {
+        var values = SrPocContextArguments.Parse(args[1..]);
+        var flagged = SrPocReviewContext.Write(values["--selected-source"], values["--qa-report"], values["--output"]);
+        Console.WriteLine($"Serbian POC flagged-context packet complete: {flagged} entries.");
+        return 0;
+    }
     var arguments = CliArguments.Parse(args);
     var result = MetadataExporter.Export(new ExportOptions(
         arguments.SourceRoot,

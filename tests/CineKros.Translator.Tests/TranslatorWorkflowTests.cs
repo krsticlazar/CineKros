@@ -19,7 +19,9 @@ public sealed class TranslatorWorkflowTests
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "C:\\in", "--output-dir", "C:\\out", "--wat", "x"]));
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "C:\\in", "--catalog", "C:\\in2", "--output-dir", "C:\\out"]));
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "in.jsonl", "--output-dir", "C:\\out"]));
-        Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "7"]));
+        Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "419"]));
+        var boundedPoc = CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "418"]);
+        Assert.AreEqual("418", boundedPoc["max-items"]);
     }
 
     [TestMethod]
@@ -272,6 +274,23 @@ public sealed class TranslatorWorkflowTests
         Assert.IsNotNull(incomplete);
         Assert.IsFalse(incomplete.Completed);
         Assert.AreEqual("incomplete_generation", incomplete.Error);
+        var overLimit = Enumerable.Range(0, 419).Select(index => new ProtocolJob($"selected tag {index}", $"selected tag {index}", TranslatorConstants.TargetToken, TranslatorConstants.DecodingId)).ToArray();
+        await Assert.ThrowsAsync<InvalidDataException>(() => PythonTranslationProcess.RunFixtureForTestsAsync(executable, fixture, "valid", overLimit, ignore, TimeSpan.FromSeconds(5), CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task ProposalRefusesToSilentlyTruncateTheSelectedTagSet()
+    {
+        using var temp = new TempDirectory();
+        var tagsPath = Path.Combine(temp.Path, "tags.json");
+        File.WriteAllText(tagsPath, "[\"one\",\"two\"]");
+        var pythonPath = Path.Combine(temp.Path, "python.exe"); File.WriteAllText(pythonPath, string.Empty);
+        var modelPath = Path.Combine(temp.Path, "model"); Directory.CreateDirectory(modelPath);
+        var arguments = CommandArguments.Parse(["propose", "--tags", tagsPath, "--python", pythonPath, "--model-dir", modelPath,
+            "--checkpoint", Path.Combine(temp.Path, "checkpoint.jsonl"), "--output-dir", Path.Combine(temp.Path, "out"), "--max-items", "1"]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => TagWorkflow.ProposeAsync(arguments, CancellationToken.None));
+        Assert.IsFalse(File.Exists(Path.Combine(temp.Path, "checkpoint.jsonl")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "out")));
     }
 
     [TestMethod]

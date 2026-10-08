@@ -65,12 +65,11 @@ public static class TagWorkflow
             throw new DirectoryNotFoundException("pinned model directory was not found");
 
         var tags = ReadTagArray(arguments["tags"]);
-        var maximum = arguments.Values.TryGetValue("max-items", out var cap) ? int.Parse(cap, System.Globalization.CultureInfo.InvariantCulture) : 6;
-        var approvedSmoke = TranslatorConstants.SmokePhrases.Order(StringComparer.Ordinal).ToArray();
-        if (tags.Count > 6 || tags.Except(approvedSmoke, StringComparer.Ordinal).Any())
-            throw new InvalidDataException("real model inference is limited to the six frozen Phase 2 smoke phrases");
+        var maximum = arguments.Values.TryGetValue("max-items", out var cap) ? int.Parse(cap, System.Globalization.CultureInfo.InvariantCulture) : 418;
+        if (tags.Count > 418)
+            throw new InvalidDataException("real model inference is limited to the bounded 418-tag Serbian POC");
         if (maximum < tags.Count)
-            tags = tags.Take(maximum).ToArray();
+            throw new InvalidDataException("--max-items cannot silently truncate a translation set");
 
         var model = ModelManifest.Load(arguments["model-dir"]);
         var projectRoot = FindProjectRoot();
@@ -82,6 +81,7 @@ public static class TagWorkflow
         RequireFile(pythonRunner, "Python runner");
         var identity = ProposalIdentity.Create(model, lockHash, runtimeIdentity.RuntimeFingerprint);
         var checkpoint = ProposalCheckpoint.Open(arguments["checkpoint"], identity);
+        var reused = tags.Count(tag => checkpoint.Completed.ContainsKey(tag));
         var jobs = tags.Where(tag => !checkpoint.Completed.ContainsKey(tag)).Select(tag =>
             new ProtocolJob(tag, tag, TranslatorConstants.TargetToken, TranslatorConstants.DecodingId)).ToArray();
 
@@ -119,7 +119,7 @@ public static class TagWorkflow
         AtomicDirectory.PublishNew(arguments["output-dir"], stage =>
         {
             WriteJson(Path.Combine(stage, "proposal-dictionary.json"), dictionary);
-            WriteJson(Path.Combine(stage, "proposal-summary.json"), new { schemaVersion = "translator-proposal-v1", sourceTagsSha256 = dictionary.SourceTagsSha256, runtimeFingerprint = runtimeIdentity.RuntimeFingerprint, count = entries.Length, autoPass = dictionary.Entries.Count(entry => entry.ReviewStatus == "auto_pass"), reviewRequired = dictionary.Entries.Count(entry => entry.ReviewStatus == "review_required") });
+            WriteJson(Path.Combine(stage, "proposal-summary.json"), new { schemaVersion = "translator-proposal-v1", sourceTagsSha256 = dictionary.SourceTagsSha256, runtimeFingerprint = runtimeIdentity.RuntimeFingerprint, count = entries.Length, reused, inferred = jobs.Length, autoPass = dictionary.Entries.Count(entry => entry.ReviewStatus == "auto_pass"), reviewRequired = dictionary.Entries.Count(entry => entry.ReviewStatus == "review_required") });
         });
     }
 
@@ -195,9 +195,8 @@ public static class TagWorkflow
         var dictionary = ReadDictionary(dictionaryPath);
         RequireFile(sourceTagsPath, "source tags");
         var sourceTags = ReadTagArray(sourceTagsPath);
-        var approvedSmoke = TranslatorConstants.SmokePhrases.Order(StringComparer.Ordinal).ToArray();
-        if (sourceTags.Count > 6 || sourceTags.Except(approvedSmoke, StringComparer.Ordinal).Any())
-            throw new InvalidDataException("Phase 2 lock output is limited to the six frozen smoke phrases");
+        if (sourceTags.Count > 418)
+            throw new InvalidDataException("Phase 3 lock output is limited to the bounded 418-tag Serbian POC");
         var expectedHash = HashCanonical(sourceTags);
         if (!StringComparer.Ordinal.Equals(expectedHash, dictionary.SourceTagsSha256))
             throw new InvalidDataException("dictionary sourceTagsSha256 does not match source tags");

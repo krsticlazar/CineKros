@@ -27,8 +27,8 @@ public static class PythonTranslationProcess
         IReadOnlyList<ProtocolJob> jobs, Func<ProtocolResponse, CancellationToken, Task> onResponse,
         TimeSpan timeout, CancellationToken cancellationToken, bool fixture = false)
     {
-        if (jobs.Count > 6 || jobs.Select(job => job.En).Distinct(StringComparer.Ordinal).Count() != jobs.Count)
-            throw new InvalidDataException("Python process received duplicate or over-limit smoke jobs");
+        if (jobs.Count > 418 || jobs.Select(job => job.En).Distinct(StringComparer.Ordinal).Count() != jobs.Count)
+            throw new InvalidDataException("Python process received duplicate or over-limit Serbian POC jobs");
 
         var start = new ProcessStartInfo(pythonPath)
         {

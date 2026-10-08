@@ -6,4 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../shared/CineKros.TextNormalization/CineKros.TextNormalization.csproj" />
+  </ItemGroup>
 </Project>

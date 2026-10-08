@@ -47,8 +47,8 @@ public sealed record CommandArguments(string Command, IReadOnlyDictionary<string
                 throw new CommandLineException($"required option '--{name}' is missing");
 
         if (values.TryGetValue("max-items", out var maximum) &&
-            (!int.TryParse(maximum, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) || limit <= 0 || limit > 6))
-            throw new CommandLineException("--max-items must be a positive integer no greater than six");
+            (!int.TryParse(maximum, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) || limit <= 0 || limit > 418))
+            throw new CommandLineException("--max-items must be a positive integer no greater than 418");
 
         foreach (var pair in values)
         {
