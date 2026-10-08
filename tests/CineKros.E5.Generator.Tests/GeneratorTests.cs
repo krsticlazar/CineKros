@@ -180,6 +180,115 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public async Task Run_PairedPocUsesSeparateLanguageJournalsAndReplaysAllCompatibleRowsWithoutInference()
+    {
+        var root = Environment.GetEnvironmentVariable("CINEKROS_POC_ROOT");
+        if (string.IsNullOrWhiteSpace(root) || !File.Exists(Path.Combine(root, "database/data/derived/serbian-search/poc-v1/catalog/movies-catalog.jsonl")))
+            Assert.Inconclusive("Frozen Serbian-search POC inputs are not installed for this test run.");
+        var poc = Path.Combine(root!, "database/data/derived/serbian-search/poc-v1");
+        var catalog = await MultilingualPocCatalog.LoadAsync(Path.Combine(poc, "catalog/movies-catalog.jsonl"), Path.Combine(poc, "catalog/manifest.json"),
+            Path.Combine(poc, "translation/tag-translations-sr.json"), Path.Combine(root!, "database/data/derived/final/b05a-real-tmdb-01/movies-catalog.jsonl"));
+        using var temp = new TempRoot();
+        var source = new FakeSource(profileDescriptor: EmbeddingProfileDescriptor.MultilingualE5Base);
+        var enCheckpoint = Path.Combine(temp.Root, "en", "checkpoint.jsonl");
+        var srCheckpoint = Path.Combine(temp.Root, "sr", "checkpoint.jsonl");
+        var en = DocumentVectorGenerator.RunMultilingualPoc(enCheckpoint, Path.Combine(temp.Root, "en-artifact"), 1, source, catalog, "en");
+        Assert.AreEqual(150, en.Generated); Assert.AreEqual(0, en.Reused); Assert.AreEqual(150, en.RecordCount);
+        CollectionAssert.AreEqual(Enumerable.Repeat(1, 150).ToArray(), source.BatchSizes.ToArray());
+        source.BatchSizes.Clear();
+        var enReplay = DocumentVectorGenerator.RunMultilingualPoc(enCheckpoint, Path.Combine(temp.Root, "en-replay"), 1, source, catalog, "en");
+        Assert.AreEqual(0, enReplay.Generated); Assert.AreEqual(150, enReplay.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+        var sr = DocumentVectorGenerator.RunMultilingualPoc(srCheckpoint, Path.Combine(temp.Root, "sr-artifact"), 1, source, catalog, "sr");
+        Assert.AreEqual(150, sr.Generated); Assert.AreEqual(0, sr.Reused); Assert.AreEqual(150, sr.RecordCount);
+        CollectionAssert.AreEqual(Enumerable.Repeat(1, 150).ToArray(), source.BatchSizes.ToArray());
+        var enRow = JsonDocument.Parse(File.ReadLines(Path.Combine(temp.Root, "en-artifact", "document-vectors.jsonl")).First()).RootElement;
+        var srRow = JsonDocument.Parse(File.ReadLines(Path.Combine(temp.Root, "sr-artifact", "document-vectors.jsonl")).First()).RootElement;
+        Assert.AreNotEqual(enRow.GetProperty("fingerprint").GetString(), srRow.GetProperty("fingerprint").GetString());
+        source.BatchSizes.Clear();
+        var srReplay = DocumentVectorGenerator.RunMultilingualPoc(srCheckpoint, Path.Combine(temp.Root, "sr-replay"), 1, source, catalog, "sr");
+        Assert.AreEqual(0, srReplay.Generated); Assert.AreEqual(150, srReplay.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+
+        var failedCheckpoint = Path.Combine(temp.Root, "publish-failure", "checkpoint.jsonl");
+        Assert.ThrowsExactly<IOException>(() => DocumentVectorGenerator.RunMultilingualPoc(failedCheckpoint, Path.Combine(temp.Root, "publish-failure", "artifact"),
+            1, source, catalog, "en", beforePublish: () => throw new IOException("injected publish failure")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Root, "publish-failure", "artifact")));
+        source.BatchSizes.Clear();
+        var afterFailedPublish = DocumentVectorGenerator.RunMultilingualPoc(failedCheckpoint, Path.Combine(temp.Root, "publish-failure", "retry"), 1, source, catalog, "en");
+        Assert.AreEqual(0, afterFailedPublish.Generated); Assert.AreEqual(150, afterFailedPublish.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+    }
+
+    [TestMethod]
+    public async Task Run_PocResumeRepairsTornTailAndRejectsChangedIdentityFingerprintAndHeader()
+    {
+        var root = Environment.GetEnvironmentVariable("CINEKROS_POC_ROOT");
+        if (string.IsNullOrWhiteSpace(root) || !File.Exists(Path.Combine(root, "database/data/derived/serbian-search/poc-v1/catalog/movies-catalog.jsonl")))
+            Assert.Inconclusive("Frozen Serbian-search POC inputs are not installed for this test run.");
+        var poc = Path.Combine(root!, "database/data/derived/serbian-search/poc-v1");
+        var catalog = await MultilingualPocCatalog.LoadAsync(Path.Combine(poc, "catalog/movies-catalog.jsonl"), Path.Combine(poc, "catalog/manifest.json"),
+            Path.Combine(poc, "translation/tag-translations-sr.json"), Path.Combine(root!, "database/data/derived/final/b05a-real-tmdb-01/movies-catalog.jsonl"));
+        using var temp = new TempRoot();
+        var source = new FakeSource(profileDescriptor: EmbeddingProfileDescriptor.MultilingualE5Base);
+        var invalidOutput = Path.Combine(temp.Root, "existing-output"); Directory.CreateDirectory(invalidOutput);
+        File.WriteAllText(Path.Combine(invalidOutput, "preserve.txt"), "existing user content");
+        Assert.ThrowsExactly<IOException>(() => DocumentVectorGenerator.RunMultilingualPoc(Path.Combine(temp.Root, "unused-checkpoint.jsonl"),
+            invalidOutput, 1, source, catalog, "en"));
+        Assert.AreEqual(0, source.BatchSizes.Count, "An invalid existing output target must be rejected before any document inference.");
+        var checkpoint = Path.Combine(temp.Root, "en", "checkpoint.jsonl");
+        var initial = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "initial"), 1, source, catalog, "en");
+        Assert.AreEqual(150, initial.Generated);
+
+        var checkpointLines = File.ReadAllLines(checkpoint).ToList(); checkpointLines.Add("{torn tail"); File.WriteAllLines(checkpoint, checkpointLines);
+        source.BatchSizes.Clear();
+        var tailReplay = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "tail-replay"), 1, source, catalog, "en");
+        Assert.AreEqual(0, tailReplay.Generated); Assert.AreEqual(150, tailReplay.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+        Assert.AreEqual(151, File.ReadAllLines(checkpoint).Length);
+
+        using (var append = new FileStream(checkpoint, FileMode.Append, FileAccess.Write, FileShare.None))
+            append.Write([0x7B, 0x22, 0x74, 0x61, 0x69, 0x6C, 0x22, 0x3A, 0xC3]);
+        var invalidUtf8Checkpoint = File.ReadAllBytes(checkpoint);
+        var backupCountBefore = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*").Length;
+        source.BatchSizes.Clear();
+        var invalidUtf8Tail = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "invalid-utf8-tail"), 1, source, catalog, "en");
+        Assert.AreEqual(0, invalidUtf8Tail.Generated); Assert.AreEqual(150, invalidUtf8Tail.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+        var backups = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*");
+        Assert.AreEqual(backupCountBefore + 1, backups.Length, "Corrupt source journal must be preserved before repair.");
+        CollectionAssert.AreEqual(invalidUtf8Checkpoint, File.ReadAllBytes(backups.OrderBy(File.GetCreationTimeUtc).Last()));
+        Assert.AreEqual(151, File.ReadAllLines(checkpoint).Length);
+
+        checkpointLines = File.ReadAllLines(checkpoint).ToList(); var header = JsonNode.Parse(checkpointLines[0])!;
+        header["catalogIdentitySha256"] = new string('0', 64); checkpointLines[0] = header.ToJsonString(); File.WriteAllLines(checkpoint, checkpointLines);
+        var incompatibleHeaderBytes = File.ReadAllBytes(checkpoint);
+        backupCountBefore = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*").Length;
+        var changedIdentity = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "identity-changed"), 1, source, catalog, "en");
+        Assert.AreEqual(150, changedIdentity.Generated); Assert.AreEqual(0, changedIdentity.Reused);
+        backups = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*");
+        Assert.AreEqual(backupCountBefore + 1, backups.Length);
+        CollectionAssert.AreEqual(incompatibleHeaderBytes, File.ReadAllBytes(backups.OrderBy(File.GetCreationTimeUtc).Last()));
+
+        checkpointLines = File.ReadAllLines(checkpoint).ToList(); var row = JsonNode.Parse(checkpointLines[1])!;
+        row["fingerprint"] = new string('f', 64); checkpointLines[1] = row.ToJsonString(); File.WriteAllLines(checkpoint, checkpointLines);
+        var incompatibleRowBytes = File.ReadAllBytes(checkpoint);
+        backupCountBefore = backups.Length;
+        source.BatchSizes.Clear();
+        var changedDocument = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "fingerprint-changed"), 1, source, catalog, "en");
+        Assert.AreEqual(1, changedDocument.Generated); Assert.AreEqual(149, changedDocument.Reused);
+        CollectionAssert.AreEqual(new[] { 1 }, source.BatchSizes.ToArray());
+        backups = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*");
+        Assert.AreEqual(backupCountBefore + 1, backups.Length);
+        CollectionAssert.AreEqual(incompatibleRowBytes, File.ReadAllBytes(backups.OrderBy(File.GetCreationTimeUtc).Last()));
+
+        checkpointLines = File.ReadAllLines(checkpoint).ToList(); checkpointLines[0] = "broken checkpoint header"; File.WriteAllLines(checkpoint, checkpointLines);
+        var corruptHeaderBytes = File.ReadAllBytes(checkpoint);
+        backupCountBefore = backups.Length;
+        source.BatchSizes.Clear();
+        var corruptHeader = DocumentVectorGenerator.RunMultilingualPoc(checkpoint, Path.Combine(temp.Root, "corrupt-header"), 1, source, catalog, "en");
+        Assert.AreEqual(150, corruptHeader.Generated); Assert.AreEqual(0, corruptHeader.Reused);
+        backups = Directory.GetFiles(Path.GetDirectoryName(checkpoint)!, Path.GetFileName(checkpoint) + ".backup-*");
+        Assert.AreEqual(backupCountBefore + 1, backups.Length);
+        CollectionAssert.AreEqual(corruptHeaderBytes, File.ReadAllBytes(backups.OrderBy(File.GetCreationTimeUtc).Last()));
+    }
+
+    [TestMethod]
     public void Run_PublishFailureLeavesCheckpointAndNoFinalDirectory()
     {
         using var f = new Fixture(); var checkpointBytes = Array.Empty<byte>();
@@ -219,6 +328,10 @@ public sealed class GeneratorTests
         Assert.AreEqual(16, parsed.BatchSize);
         Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--batch-size", "0"]));
         Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--api-key", "bad"]));
+        Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1"]));
+        Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--language", "xx", "--dictionary", "f", "--source-catalog", "g"]));
+        var multilingual = GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--language", "sr", "--dictionary", "f", "--source-catalog", "g"]);
+        Assert.AreEqual("sr", multilingual.Language);
     }
 
     [TestMethod]
@@ -316,6 +429,12 @@ public sealed class GeneratorTests
             File.WriteAllText(Manifest, JsonSerializer.Serialize(new { catalogVersion = CatalogPolicy.VersionValue, contentFingerprint = fingerprint ?? new string('b', 64), output = new { sha256 = hash, recordCount = lines.Length, order = "movieLensId ascending" } }));
         }
         public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+    private sealed class TempRoot : IDisposable
+    {
+        public string Root { get; } = Path.Combine(Path.GetTempPath(), "e5-poc-test-" + Guid.NewGuid().ToString("N"));
+        public TempRoot() => Directory.CreateDirectory(Root);
+        public void Dispose() { if (Directory.Exists(Root)) Directory.Delete(Root, true); }
     }
     private sealed record CatalogItem(long Id, string Text);
 }

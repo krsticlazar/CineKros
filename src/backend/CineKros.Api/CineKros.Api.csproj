@@ -13,6 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../embedding/CineKros.Embedding/CineKros.Embedding.csproj" />
+    <ProjectReference Include="../../etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Prompts/movie-query-parser.md" CopyToOutputDirectory="PreserveNewest" />

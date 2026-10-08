@@ -8,8 +8,9 @@ if (string.IsNullOrWhiteSpace(connectionString))
     return 2;
 }
 
-var migrationDirectory = args.Length == 1
-    ? Path.GetFullPath(args[0])
+var draftPoc002 = args.Length > 0 && args[0] == "--poc-draft-002";
+var migrationDirectory = args.Length == (draftPoc002 ? 2 : 1)
+    ? Path.GetFullPath(args[^1])
     : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../migrations"));
 if (!Directory.Exists(migrationDirectory))
 {
@@ -17,6 +18,8 @@ if (!Directory.Exists(migrationDirectory))
     return 2;
 }
 var paths = Directory.GetFiles(migrationDirectory, "*.sql")
+    .Where(path => Path.GetFileName(path).StartsWith("001_", StringComparison.Ordinal) ||
+        (draftPoc002 && Path.GetFileName(path).Equals("002_serbian_search_vectors.sql", StringComparison.Ordinal)))
     .OrderBy(Path.GetFileName, StringComparer.Ordinal)
     .ToArray();
 if (paths.Length == 0)
@@ -29,6 +32,9 @@ try
 {
     await using var dataSource = NpgsqlDataSource.Create(connectionString);
     await using var connection = await dataSource.OpenConnectionAsync();
+    var databaseName = (string?)await new NpgsqlCommand("SELECT current_database()", connection).ExecuteScalarAsync();
+    if (draftPoc002 && (databaseName is null || !databaseName.StartsWith("cinekros_sr_poc_", StringComparison.Ordinal)))
+        throw new MigrationFailure("Draft migration 002 is restricted to an isolated Serbian POC database.");
     await using (var bootstrap = new NpgsqlCommand("""
         CREATE TABLE IF NOT EXISTS schema_migrations (
             version text PRIMARY KEY,

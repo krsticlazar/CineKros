@@ -53,6 +53,12 @@
         "resolved": "1.4.1",
         "contentHash": "AcjRf1y5/ArFL16no9eR5Tg8HeS0CUdYfypASvszuE6+KfHXndmtnh5IeqWKnIP6F2KNSSGKXcncgXKx0RDcWQ=="
       },
+      "cinekros.catalog.importer": {
+        "type": "Project",
+        "dependencies": {
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "cinekros.embedding": {
         "type": "Project",
         "dependencies": {

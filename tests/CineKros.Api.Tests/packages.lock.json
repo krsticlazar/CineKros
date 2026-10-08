@@ -457,6 +457,7 @@
       "cinekros.api": {
         "type": "Project",
         "dependencies": {
+          "CineKros.Catalog.Importer": "[1.0.0, )",
           "CineKros.Embedding": "[1.0.0, )",
           "Npgsql": "[10.0.3, )",
           "Pgvector": "[0.3.2, )"
