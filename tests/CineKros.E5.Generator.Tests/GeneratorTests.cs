@@ -162,6 +162,24 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public void Run_ExplicitMultilingualProfileRequiresBatchOneAndWritesItsShapeIdentity()
+    {
+        using var f = new Fixture();
+        var source = new FakeSource(profileDescriptor: EmbeddingProfileDescriptor.MultilingualE5Base);
+        Assert.ThrowsExactly<ArgumentException>(() => f.Run(source, 2));
+        Assert.AreEqual(0, source.BatchSizes.Count);
+        var run = f.Run(source, 1);
+        Assert.AreEqual(3, run.Generated);
+        CollectionAssert.AreEqual(new[] { 1, 1, 1 }, source.BatchSizes.ToArray());
+        using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(f.Output, "manifest.json")));
+        Assert.AreEqual("multilingual-e5-base-int8-onnx-v1", manifest.RootElement.GetProperty("profile").GetString());
+        Assert.AreEqual(EmbeddingProfileDescriptor.MultilingualE5Base.ProfileFingerprint, manifest.RootElement.GetProperty("profileFingerprint").GetString());
+        Assert.AreEqual("single-sequence-unpadded-v1", manifest.RootElement.GetProperty("inferenceShapePolicy").GetString());
+        using var checkpointHeader = JsonDocument.Parse(File.ReadLines(f.Checkpoint).First());
+        Assert.AreEqual("single-sequence-unpadded-v1", checkpointHeader.RootElement.GetProperty("inferenceShapePolicy").GetString());
+    }
+
+    [TestMethod]
     public void Run_PublishFailureLeavesCheckpointAndNoFinalDirectory()
     {
         using var f = new Fixture(); var checkpointBytes = Array.Empty<byte>();
@@ -243,7 +261,7 @@ public sealed class GeneratorTests
         return string.Empty;
     }
 
-    private sealed class FakeSource(Action? afterBatch = null, string? profileFingerprint = null) : IDocumentVectorSource
+    private sealed class FakeSource(Action? afterBatch = null, string? profileFingerprint = null, EmbeddingProfileDescriptor? profileDescriptor = null) : IDocumentVectorSource
     {
         public List<int> BatchSizes { get; } = [];
         public IReadOnlyList<float[]> Embed(IReadOnlyList<string> semanticTexts, CancellationToken cancellationToken)
@@ -252,7 +270,8 @@ public sealed class GeneratorTests
             return semanticTexts.Select(_ => UnitVector()).ToArray();
         }
         public string Fingerprint(string semanticText) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("fingerprint:" + semanticText)));
-        public string ProfileFingerprint => profileFingerprint ?? new string('a', 64);
+        public string ProfileFingerprint => profileFingerprint ?? ProfileDescriptor.ProfileFingerprint;
+        public CineKros.Embedding.EmbeddingProfileDescriptor ProfileDescriptor => profileDescriptor ?? CineKros.Embedding.EmbeddingProfileDescriptor.LegacyEnglish;
         public long TruncationCount => 0;
         private static float[] UnitVector() { var result = new float[768]; result[0] = 1f; return result; }
     }
@@ -268,6 +287,7 @@ public sealed class GeneratorTests
         }
         public string Fingerprint(string semanticText) => inner.Fingerprint(semanticText);
         public string ProfileFingerprint => inner.ProfileFingerprint;
+        public CineKros.Embedding.EmbeddingProfileDescriptor ProfileDescriptor => inner.ProfileDescriptor;
         public long TruncationCount => inner.TruncationCount;
     }
 

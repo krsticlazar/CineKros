@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/database/" />
   <Folder Name="/src/etl/">
+    <Project Path="src/etl/CineKros.Translator/CineKros.Translator.csproj" />
     <Project Path="src/etl/CineKros.Etl/CineKros.Etl.csproj" />
     <Project Path="src/etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj" />
     <Project Path="src/etl/CineKros.Database.Migrator/CineKros.Database.Migrator.csproj" />
@@ -14,7 +15,12 @@
   <Folder Name="/src/backend/">
     <Project Path="src/backend/CineKros.Api/CineKros.Api.csproj" />
   </Folder>
+  <Folder Name="/src/shared/">
+    <Project Path="src/shared/CineKros.TextNormalization/CineKros.TextNormalization.csproj" />
+  </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CineKros.Translator.Tests/CineKros.Translator.Tests.csproj" />
+    <Project Path="tests/CineKros.TextNormalization.Tests/CineKros.TextNormalization.Tests.csproj" />
     <Project Path="tests/CineKros.Embedding.Tests/CineKros.Embedding.Tests.csproj" />
     <Project Path="tests/CineKros.E5.Generator.Tests/CineKros.E5.Generator.Tests.csproj" />
     <Project Path="tests/CineKros.Api.Tests/CineKros.Api.Tests.csproj" />

@@ -1,0 +1,20 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/etl/CineKros.Translator/CineKros.Translator.csproj" />
+    <ProjectReference Include="ProtocolFixtureRunner/ProtocolFixtureRunner.csproj" ReferenceOutputAssembly="false" />
+    <Compile Remove="ProtocolFixtureRunner/**/*.cs" />
+    <Content Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CopyProtocolFixtureRunner" AfterTargets="Build">
+    <ItemGroup>
+      <ProtocolFixtureRunnerFiles Include="ProtocolFixtureRunner/bin/$(Configuration)/net10.0/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ProtocolFixtureRunnerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -6,7 +6,8 @@ namespace CineKros.Embedding.Tests;
 [TestClass]
 public sealed class E5EmbeddingTests
 {
-    private static readonly string ModelDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../database/data/models/e5-base-v2/f52bf8ec8c7124536f0efb74aca902b2995e5bcd"));
+    private static readonly string ModelDir = Environment.GetEnvironmentVariable("CINEKROS_E5_MODEL_ROOT") ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../database/data/models/e5-base-v2/f52bf8ec8c7124536f0efb74aca902b2995e5bcd"));
+    private static readonly string MultilingualModelDir = Environment.GetEnvironmentVariable("CINEKROS_MULTILINGUAL_E5_MODEL_ROOT") ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../database/data/models/multilingual-e5-base/d128750597153bb5987e10b1c3493a34e5a4502a"));
     [TestMethod]
     public void LoadsPinnedAssetsTokenizesAndComputesStableFingerprints()
     {
@@ -39,6 +40,38 @@ public sealed class E5EmbeddingTests
         Assert.AreEqual(0.70710677f, v[0], 0.0001f); Assert.AreEqual(0.70710677f, v[1], 0.0001f);
         Assert.AreEqual(1d, Math.Sqrt(v.Sum(x => (double)x*x)), 0.00001d);
     }
+
+    [TestMethod]
+    public void ExplicitMultilingualProfileAuditsPinnedGraphAndXlmRobertaSpecialTokens()
+    {
+        var profile = EmbeddingProfileDescriptor.MultilingualE5Base;
+        using var model = new E5EmbeddingModel(MultilingualModelDir, profile);
+        Assert.AreEqual(profile.ProfileVersion, model.ProfileId);
+        Assert.AreEqual("intfloat/multilingual-e5-base", profile.ModelId);
+        Assert.AreEqual(512, profile.MaxTokens);
+        Assert.AreEqual(768, profile.Dimension);
+        Assert.IsTrue(profile.IsCompatibleWith(EmbeddingProfileDescriptor.MultilingualE5Base));
+        Assert.IsFalse(profile.IsCompatibleWith(EmbeddingProfileDescriptor.LegacyEnglish), "Equal dimensions cannot make different model profiles compatible.");
+        var originalArtifactCount = profile.Artifacts.Length;
+        _ = profile.Artifacts.Add(new EmbeddingArtifact("unexpected", "0"));
+        Assert.AreEqual(originalArtifactCount, profile.Artifacts.Length, "ImmutableArray.Add must not mutate the shared profile descriptor.");
+
+        CollectionAssert.AreEquivalent(new[] { "input_ids", "attention_mask" }, model.GraphInputs.Select(x => x.Name).ToArray());
+        Assert.IsTrue(model.GraphInputs.All(x => x.ElementType == "System.Int64" && x.Dimensions.Length == 2));
+        foreach (var input in model.GraphInputs)
+            CollectionAssert.AreEqual(new[] { -1, -1 }, input.Dimensions, $"Unexpected dimensions for actual graph input {input.Name}.");
+        Assert.AreEqual("last_hidden_state", model.GraphOutputs.Single().Name);
+        Assert.AreEqual("System.Single", model.GraphOutputs.Single().ElementType);
+        CollectionAssert.AreEqual(new[] { -1, -1, 768 }, model.GraphOutputs.Single().Dimensions);
+
+        var tokenized = model.Tokenize("Cafe\u0301, Мрачан филм.");
+        Assert.AreEqual(0L, tokenized.InputIds[0]);
+        Assert.AreEqual(2L, tokenized.InputIds[^1]);
+        Assert.IsTrue(tokenized.InputIds.All(id => id is >= 0 and < 250002));
+        var vector = model.EmbedQuery("Cafe\u0301, Мрачан филм.");
+        AssertVector(vector);
+    }
+
     [TestMethod]
     public void RunsPinnedOnnxAndRejectsTampering()
     {

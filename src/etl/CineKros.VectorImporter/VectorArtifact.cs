@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Encodings.Web;
 using CineKros.Catalog.Importer;
+using CineKros.Embedding;
 
 namespace CineKros.VectorImporter;
 
@@ -17,13 +18,14 @@ public sealed class VectorArtifact
 
 public static class VectorArtifactValidator
 {
-    public const string Profile = "e5-base-v2-int8-onnx-v1";
-    public const string ModelId = "intfloat/e5-base-v2";
-    public const string ModelRevision = "f52bf8ec8c7124536f0efb74aca902b2995e5bcd";
-    public const string OnnxSha256 = "f2ff55f62dfca9ce0f4a5656ae0b1571b9fbc5e15eda3b2c56dd32f329b2005e";
-    public const string TokenizerSha256 = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66";
+    private static EmbeddingProfileDescriptor Legacy => EmbeddingProfileDescriptor.LegacyEnglish;
+    public static string Profile => Legacy.ProfileVersion;
+    public static string ModelId => Legacy.ModelId;
+    public static string ModelRevision => Legacy.Revision;
+    public static string OnnxSha256 => Legacy.Artifact("model_qint8_avx512_vnni.onnx").Sha256;
+    public static string TokenizerSha256 => Legacy.Artifact("tokenizer.json").Sha256;
     public const string CatalogFingerprint = "2ffad7ba703cb80543db617e742a61c88871332910185767ee96fe08a77a0be7";
-    public const string ProfileFingerprint = "9411a2620fc30e348aa80c9d4e54ca0db5a00d94a92175c82ccdd47ad03b13e1";
+    public static string ProfileFingerprint => Legacy.ProfileFingerprint;
     public const int Dimension = 768;
     private const string ArtifactFormat = "e5-document-vectors-jsonl-v1";
     private const string DocumentFormat = "e5-passage-semantictext-v1";
@@ -33,6 +35,23 @@ public static class VectorArtifactValidator
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
     private static readonly string[] ManifestFields = ["format", "catalogVersion", "catalogSha256", "catalogContentFingerprint", "profile", "profileFingerprint", "modelId", "modelRevision", "onnxSha256", "tokenizerSha256", "dimension", "documentInputFormat", "fingerprintAlgorithm", "pooling", "normalization", "maxTokens", "outputSha256", "recordCount", "order", "failedRecords", "truncatedRecords", "batchSize", "elapsedMilliseconds", "provenance"];
+
+    public static bool ValidateProfileManifest(JsonElement manifest, EmbeddingProfileDescriptor profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (!ReferenceEquals(profile, EmbeddingProfileDescriptor.LegacyEnglish) && !ReferenceEquals(profile, EmbeddingProfileDescriptor.MultilingualE5Base)) return false;
+        var names = manifest.ValueKind == JsonValueKind.Object ? manifest.EnumerateObject().Select(p => p.Name).ToArray() : [];
+        var expectedFields = ReferenceEquals(profile, Legacy) ? ManifestFields : [.. ManifestFields, "inferenceShapePolicy"];
+        return names.SequenceEqual(expectedFields, StringComparer.Ordinal) &&
+            String(manifest, "profile") == profile.ProfileVersion && String(manifest, "profileFingerprint") == profile.ProfileFingerprint &&
+            String(manifest, "modelId") == profile.ModelId && String(manifest, "modelRevision") == profile.Revision &&
+            String(manifest, "onnxSha256") == profile.Artifact("model_qint8_avx512_vnni.onnx").Sha256 &&
+            String(manifest, "tokenizerSha256") == profile.Artifact("tokenizer.json").Sha256 &&
+            Int(manifest, "dimension") == profile.Dimension &&
+            String(manifest, "pooling") == profile.Pooling && String(manifest, "normalization") == profile.Normalization &&
+            Int(manifest, "maxTokens") == profile.MaxTokens &&
+            (profile.InferenceShapePolicy is null ? !manifest.TryGetProperty("inferenceShapePolicy", out _) : String(manifest, "inferenceShapePolicy") == profile.InferenceShapePolicy);
+    }
 
     public static async Task<VectorArtifact> LoadAsync(string artifactDirectory, string catalogPath, CancellationToken cancellationToken = default)
     {
@@ -67,13 +86,10 @@ public static class VectorArtifactValidator
             var m = manifest.RootElement;
             RejectFakeMarker(m);
             var names = m.ValueKind == JsonValueKind.Object ? m.EnumerateObject().Select(p => p.Name).ToArray() : [];
-            if (!names.SequenceEqual(ManifestFields, StringComparer.Ordinal) ||
+            if (names.Length != ManifestFields.Length || !ValidateProfileManifest(m, Legacy) ||
                 String(m, "format") != ArtifactFormat || String(m, "catalogVersion") != CatalogValidator.CatalogVersion ||
                 String(m, "catalogSha256") != catalog.JsonlHash || String(m, "catalogContentFingerprint") != CatalogFingerprint ||
-                String(m, "profile") != Profile || String(m, "profileFingerprint") != ProfileFingerprint ||
-                String(m, "modelId") != ModelId || String(m, "modelRevision") != ModelRevision ||
-                String(m, "onnxSha256") != OnnxSha256 || String(m, "tokenizerSha256") != TokenizerSha256 ||
-                Int(m, "dimension") != Dimension || String(m, "documentInputFormat") != DocumentFormat ||
+                String(m, "documentInputFormat") != DocumentFormat ||
                 String(m, "fingerprintAlgorithm") != "sha256-compact-json-e5-v1" || String(m, "pooling") != "mask-mean-v1" ||
                 String(m, "normalization") != "l2-f32-v1" || Int(m, "maxTokens") != 512 ||
                 String(m, "outputSha256") != outputHash || Int(m, "recordCount") != CatalogValidator.ExpectedCount ||

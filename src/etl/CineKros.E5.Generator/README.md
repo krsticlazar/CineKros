@@ -1,20 +1,21 @@
 # CineKros.E5.Generator
 
-## Uloga
+## Role
 
-Offline CLI računa E5 document vektor za `semanticText` svakog filma u finalnom katalogu, lokalnim ONNX modelom. Čuva checkpoint i ponovo koristi samo kompatibilne rezultate; tek potpun skup objavljuje kao artefakt. Ne poziva Gemini.
+Offline CLI calculates E5 passage vectors for catalog `semanticText` using a local ONNX model. It checkpoints only compatible results and publishes only complete output. It does not call Gemini.
 
-## Mesto u toku
+## Pipeline position
 
 `[CineKros.Etl](../CineKros.Etl/README.md) → katalog → E5.Generator → artefakt → [VectorImporter](../CineKros.VectorImporter/README.md) → PostgreSQL`
 
 [CineKros.Embedding](../../embedding/CineKros.Embedding/README.md) izvršava zajednički E5 profil; [Catalog.Importer](../CineKros.Catalog.Importer/README.md) obezbeđuje validaciju istog kataloga.
 
-## Kako čitati kod
+## Usage and contracts
 
 - [Program.cs](Program.cs) povezuje parsiranje opcija, `E5EmbeddingModel` i generator.
-- `GeneratorArguments.Parse` u [GeneratorArguments.cs](GeneratorArguments.cs) definiše CLI ulaze: katalog, manifest, lokalni model, checkpoint, izlaz i batch veličinu.
-- [DocumentVectorGenerator.cs](DocumentVectorGenerator.cs) proverava katalog, obrađuje batch-eve, nastavlja iz kompatibilnog checkpoint-a i objavljuje kompletan JSONL/manifest.
+- `GeneratorArguments.Parse` in [GeneratorArguments.cs](GeneratorArguments.cs) accepts catalog, manifest, local model, checkpoint, output, optional batch size, and optional profile ID.
+- [DocumentVectorGenerator.cs](DocumentVectorGenerator.cs) validates the catalog, resumes compatible checkpoints, and publishes a complete JSONL/manifest pair.
+- Omitting `--profile` preserves the legacy profile and default batching. The explicit multilingual profile requires `--profile multilingual-e5-base-int8-onnx-v1 --batch-size 1`; its checkpoint and manifest carry the locked `single-sequence-unpadded-v1` shape policy.
 - `E5DocumentVectorSource` prilagođava `E5EmbeddingModel` interfejsu generatora.
 
-Checkpoint smanjuje ponovljeni rad pri prekidu; manifest vezuje rezultat za ulazni katalog i E5 profil. Vektori filmova se računaju unapred, dok runtime računa samo vektor korisničkog upita.
+Checkpoints avoid repeated work after interruption; manifests bind outputs to the catalog and immutable E5 profile. This package does not activate an artifact or modify database state.

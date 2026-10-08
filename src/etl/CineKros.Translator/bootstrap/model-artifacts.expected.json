@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "opus-mt-expected-artifacts-v1",
+  "modelId": "Helsinki-NLP/opus-mt-en-sla",
+  "revision": "0bc26914f2f82c3dd5b235e420aa2c711a5ed3d8",
+  "license": "Apache-2.0",
+  "files": {
+    "config.json": { "size": 1395, "gitOid": "d9cc6c5300415e8f1b97b335a9f00c692d34b791" },
+    "generation_config.json": { "size": 293, "gitOid": "b5578ddff28fb5bcc5f5ca959fa9df6c2b310230" },
+    "pytorch_model.bin": { "size": 299524665, "gitOid": "bed73c55e2a1a84d8d522448619379e588801876", "lfsSha256": "1352ae4ef442420c47e9a9693a4baa2628be4579b167e04a801e57096f390196" },
+    "source.spm": { "size": 791358, "gitOid": "c232215fa17d9fe3927d8f6220337bf48379396a" },
+    "target.spm": { "size": 860404, "gitOid": "c749c776ad99a3f9ede35b4a08e303e59b874cbc" },
+    "tokenizer_config.json": { "size": 44, "gitOid": "d30e15f9c8d41fa0f1467b3693cfbb92280ff708" },
+    "vocab.json": { "size": 1714992, "gitOid": "dafdb4bdc9b04b5feb48592010ff2efb5201226d" }
+  }
+}
