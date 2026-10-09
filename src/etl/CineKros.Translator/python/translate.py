@@ -17,7 +17,7 @@ TARGET_ID = 36
 MAX_SOURCE_TOKENS = 512
 MAX_NEW_TOKENS = 32
 NUM_BEAMS = 4
-MAX_POC_JOBS = 418
+MAX_PROPOSAL_JOBS = 575
 
 
 def _sha256(path: Path) -> str:
@@ -92,7 +92,7 @@ def _validate_job(job: object) -> tuple[str, str, str, str]:
 
 
 def _register_job(en: str, seen: set[str]) -> None:
-    if en in seen or len(seen) >= MAX_POC_JOBS:
+    if en in seen or len(seen) >= MAX_PROPOSAL_JOBS:
         raise ValueError("duplicate_or_over_limit_job")
     seen.add(en)
 

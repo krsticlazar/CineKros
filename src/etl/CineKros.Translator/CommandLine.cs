@@ -12,7 +12,8 @@ public sealed record CommandArguments(string Command, IReadOnlyDictionary<string
         ["propose"] = ["tags", "python", "model-dir", "checkpoint", "output-dir"],
         ["qa"] = ["dictionary", "output-dir"],
         ["apply-review"] = ["dictionary", "review", "output-dir"],
-        ["lock"] = ["dictionary", "source-tags", "output-dir"]
+        ["lock"] = ["dictionary", "source-tags", "output-dir"],
+        ["lock-full"] = ["candidate", "baseline", "proposals", "source-tags", "catalog", "review", "output-dir"]
     };
 
     private static readonly HashSet<string> Optional = ["max-items"];
@@ -22,7 +23,7 @@ public sealed record CommandArguments(string Command, IReadOnlyDictionary<string
     public static CommandArguments Parse(IReadOnlyList<string> args)
     {
         if (args.Count == 0 || !Required.ContainsKey(args[0]))
-            throw new CommandLineException("expected extract-tags, propose, qa, apply-review, or lock");
+            throw new CommandLineException("expected extract-tags, propose, qa, apply-review, lock, or lock-full");
 
         var command = args[0];
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -47,8 +48,8 @@ public sealed record CommandArguments(string Command, IReadOnlyDictionary<string
                 throw new CommandLineException($"required option '--{name}' is missing");
 
         if (values.TryGetValue("max-items", out var maximum) &&
-            (!int.TryParse(maximum, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) || limit <= 0 || limit > 418))
-            throw new CommandLineException("--max-items must be a positive integer no greater than 418");
+            (!int.TryParse(maximum, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) || limit <= 0 || limit > 993))
+            throw new CommandLineException("--max-items must be a positive integer no greater than 993");
 
         foreach (var pair in values)
         {
@@ -83,6 +84,9 @@ public static class TranslatorCli
                 break;
             case "lock":
                 TagWorkflow.Lock(parsed["dictionary"], parsed["source-tags"], parsed["output-dir"]);
+                break;
+            case "lock-full":
+                FullLockWorkflow.Lock(parsed);
                 break;
             default:
                 throw new CommandLineException("unsupported command");

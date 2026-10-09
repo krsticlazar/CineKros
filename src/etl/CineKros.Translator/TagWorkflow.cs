@@ -65,11 +65,10 @@ public static class TagWorkflow
             throw new DirectoryNotFoundException("pinned model directory was not found");
 
         var tags = ReadTagArray(arguments["tags"]);
-        var maximum = arguments.Values.TryGetValue("max-items", out var cap) ? int.Parse(cap, System.Globalization.CultureInfo.InvariantCulture) : 418;
-        if (tags.Count > 418)
-            throw new InvalidDataException("real model inference is limited to the bounded 418-tag Serbian POC");
-        if (maximum < tags.Count)
-            throw new InvalidDataException("--max-items cannot silently truncate a translation set");
+        var maximum = arguments.Values.TryGetValue("max-items", out var cap)
+            ? int.Parse(cap, System.Globalization.CultureInfo.InvariantCulture)
+            : TranslatorConstants.MaxBoundedPocTags;
+        ValidateProposalBatchSize(tags.Count, maximum);
 
         var model = ModelManifest.Load(arguments["model-dir"]);
         var projectRoot = FindProjectRoot();
@@ -195,8 +194,7 @@ public static class TagWorkflow
         var dictionary = ReadDictionary(dictionaryPath);
         RequireFile(sourceTagsPath, "source tags");
         var sourceTags = ReadTagArray(sourceTagsPath);
-        if (sourceTags.Count > 418)
-            throw new InvalidDataException("Phase 3 lock output is limited to the bounded 418-tag Serbian POC");
+        ValidateFullDictionarySize(sourceTags.Count);
         var expectedHash = HashCanonical(sourceTags);
         if (!StringComparer.Ordinal.Equals(expectedHash, dictionary.SourceTagsSha256))
             throw new InvalidDataException("dictionary sourceTagsSha256 does not match source tags");
@@ -261,6 +259,22 @@ public static class TagWorkflow
     public static string HashCanonical(IReadOnlyList<string> tags) => Convert.ToHexStringLower(
         SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(tags.Order(StringComparer.Ordinal))));
 
+    internal static void ValidateProposalBatchSize(int tagCount, int maximum)
+    {
+        if (tagCount < 0 || tagCount > TranslatorConstants.MaxPhase7MissingProposals)
+            throw new InvalidDataException("one proposal run cannot exceed the 575 explicitly authorized missing tags");
+        if (maximum < 1 || maximum > TranslatorConstants.MaxFullDictionaryTags)
+            throw new InvalidDataException("--max-items must be between 1 and 993");
+        if (tagCount > maximum)
+            throw new InvalidDataException("--max-items cannot silently truncate a translation set");
+    }
+
+    internal static void ValidateFullDictionarySize(int tagCount)
+    {
+        if (tagCount < 0 || tagCount > TranslatorConstants.MaxFullDictionaryTags)
+            throw new InvalidDataException("a full dictionary cannot exceed the 993 canonical English tags");
+    }
+
     internal static string HashFile(string path)
     {
         using var stream = File.OpenRead(path);
@@ -283,7 +297,7 @@ public static class TagWorkflow
                 throw new InvalidDataException($"duplicate JSON key '{pair.Key}'");
     }
 
-    private static void EnsureNoDuplicateJsonKeys(string path)
+    internal static void EnsureNoDuplicateJsonKeys(string path)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(path));
         var pending = new Stack<JsonElement>();

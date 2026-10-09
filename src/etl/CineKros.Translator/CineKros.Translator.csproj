@@ -9,4 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../../shared/CineKros.TextNormalization/CineKros.TextNormalization.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CineKros.Translator.Tests" />
+  </ItemGroup>
 </Project>

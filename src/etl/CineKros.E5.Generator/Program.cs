@@ -15,13 +15,24 @@ try
         await RunPairedPoc(options);
         return 0;
     }
+    if (options.PairedFull)
+    {
+        await RunPairedFull(options);
+        return 0;
+    }
     if (options.Language is not null)
     {
-        var catalog = await MultilingualPocCatalog.LoadAsync(options.Catalog, options.Manifest, options.Dictionary!, options.SourceCatalog!);
+        var full = options.FullCatalog;
+        var catalog = full
+            ? await FullBilingualCatalog.LoadAsync(options.Catalog, options.Manifest, options.Dictionary!, options.SourceCatalog!)
+            : null;
+        var pocCatalog = full ? null : await MultilingualPocCatalog.LoadAsync(options.Catalog, options.Manifest, options.Dictionary!, options.SourceCatalog!);
         using var pocModel = new E5EmbeddingModel(options.ModelDirectory, profile);
-        var pocResult = DocumentVectorGenerator.RunMultilingualPoc(options.Checkpoint, options.OutputDirectory, options.BatchSize,
-            new E5DocumentVectorSource(pocModel), catalog, options.Language);
-        Console.WriteLine($"Published {pocResult.RecordCount} {options.Language} multilingual POC vectors; generated={pocResult.Generated}, reused={pocResult.Reused}.");
+        var source = new E5DocumentVectorSource(pocModel);
+        var multilingualResult = full
+            ? DocumentVectorGenerator.RunFullCatalog(options.Checkpoint, options.OutputDirectory, options.BatchSize, source, catalog!, options.Language)
+            : DocumentVectorGenerator.RunMultilingualPoc(options.Checkpoint, options.OutputDirectory, options.BatchSize, source, pocCatalog!, options.Language);
+        Console.WriteLine($"Published {multilingualResult.RecordCount} {options.Language} {(full ? "full" : "POC")} multilingual vectors; generated={multilingualResult.Generated}, reused={multilingualResult.Reused}.");
         return 0;
     }
     using var model = new E5EmbeddingModel(options.ModelDirectory, profile);
@@ -126,6 +137,81 @@ static async Task RunPairedPoc(GeneratorArguments options)
     }));
     await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"Paired POC complete: EN {enRun.Generated}/150 generated, SR {srRun.Generated}/150 generated; encoder instances=1; report={reportPath}");
+}
+
+static async Task RunPairedFull(GeneratorArguments options)
+{
+    var catalog = await FullBilingualCatalog.LoadAsync(options.Catalog, options.Manifest, options.Dictionary!, options.SourceCatalog!);
+    var tokenAudit = FullCatalogTokenAudit.Measure(options.ModelDirectory, catalog);
+    var auditDirectory = Path.Combine(Directory.GetCurrentDirectory(), ".local", "planning", "reports", "sr-phase-08", "generation");
+    Directory.CreateDirectory(auditDirectory);
+    var tokenAuditPath = Path.Combine(auditDirectory, "full-token-audit-" + DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ", System.Globalization.CultureInfo.InvariantCulture) + ".json");
+    await File.WriteAllBytesAsync(tokenAuditPath, JsonSerializer.SerializeToUtf8Bytes(tokenAudit, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Full-catalog token audit: documents={tokenAudit.DocumentCount}, maxRawTokens={tokenAudit.MaximumRawTokenCount}, over512 EN={tokenAudit.EnglishTruncatedCount}, SR={tokenAudit.SerbianTruncatedCount}; evidence={tokenAuditPath}");
+    if (options.TokenAuditOnly)
+    {
+        if (tokenAudit.EnglishTruncatedCount != 0 || tokenAudit.SerbianTruncatedCount != 0)
+            throw new InvalidDataException("Token-audit-only completed with truncations; no vector inference was started.");
+        return;
+    }
+    if (tokenAudit.EnglishTruncatedCount != 0 || tokenAudit.SerbianTruncatedCount != 0)
+        throw new InvalidDataException($"Full-catalog tokenizer audit found EN={tokenAudit.EnglishTruncatedCount}, SR={tokenAudit.SerbianTruncatedCount} inputs over {EmbeddingProfileDescriptor.MultilingualE5Base.MaxTokens} tokens. Review evidence at {tokenAuditPath} before inference.");
+    MultilingualPocCatalogDocument? validatedPocV2 = null;
+    string? pocV2Root = options.PocV2ReuseRoot;
+    if (pocV2Root is not null)
+    {
+        var baseRoot = Path.Combine(Path.GetDirectoryName(pocV2Root)!, "poc-v1");
+        var approvedMapping = Path.Combine(Directory.GetCurrentDirectory(), ".local", "planning", "reports", "sr-phase-06t", "review", "corrections-approved.json");
+        validatedPocV2 = await CorrectedPocCatalog.LoadAsync(
+            Path.Combine(pocV2Root, "catalog", "movies-catalog.jsonl"), Path.Combine(pocV2Root, "catalog", "manifest.json"),
+            Path.Combine(pocV2Root, "translation", "tag-translations-sr.json"), approvedMapping,
+            Path.Combine(baseRoot, "catalog", "movies-catalog.jsonl"), Path.Combine(baseRoot, "catalog", "manifest.json"),
+            Path.Combine(baseRoot, "translation", "tag-translations-sr.json"), options.SourceCatalog!);
+    }
+    var outputRoot = Path.GetFullPath(options.OutputDirectory);
+    var checkpointRoot = Path.GetFullPath(options.Checkpoint);
+    var existing = new Dictionary<string, RunResult?>(StringComparer.Ordinal)
+    {
+        ["en"] = DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog, "en", Path.Combine(outputRoot, "en", "published")),
+        ["sr"] = DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog, "sr", Path.Combine(outputRoot, "sr", "published"))
+    };
+    var seeded = new Dictionary<string, int>(StringComparer.Ordinal) { ["en"] = 0, ["sr"] = 0 };
+    if (validatedPocV2 is not null)
+        foreach (var language in new[] { "en", "sr" })
+            if (existing[language] is null)
+                seeded[language] = DocumentVectorGenerator.SeedFullCatalogFromValidatedPocV2(
+                    Path.Combine(checkpointRoot, language, "checkpoint.jsonl"), catalog, validatedPocV2, language,
+                    Path.Combine(pocV2Root!, "embeddings", language, "document-vectors.jsonl"));
+    var needsModel = existing.Values.Any(x => x is null);
+    var watch = Stopwatch.StartNew();
+    using var model = needsModel ? new E5EmbeddingModel(options.ModelDirectory, EmbeddingProfileDescriptor.MultilingualE5Base) : null;
+    watch.Stop();
+    var loadMilliseconds = watch.ElapsedMilliseconds;
+    var process = Process.GetCurrentProcess();
+    var loadedWorkingSetBytes = process.WorkingSet64;
+    var source = model is null ? null : new E5DocumentVectorSource(model);
+    var en = existing["en"] ?? DocumentVectorGenerator.RunFullCatalog(Path.Combine(checkpointRoot, "en", "checkpoint.jsonl"), Path.Combine(outputRoot, "en", "published"), 1, source!, catalog, "en");
+    var sr = existing["sr"] ?? DocumentVectorGenerator.RunFullCatalog(Path.Combine(checkpointRoot, "sr", "checkpoint.jsonl"), Path.Combine(outputRoot, "sr", "published"), 1, source!, catalog, "sr");
+    var reportDirectory = auditDirectory;
+    Directory.CreateDirectory(reportDirectory);
+    var reportPath = Path.Combine(reportDirectory, "paired-full-resource-report-" + DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ", System.Globalization.CultureInfo.InvariantCulture) + ".json");
+    var report = new
+    {
+        format = "multilingual-full-resource-report-v1", catalogIdentitySha256 = catalog.IdentitySha256,
+        catalogSha256 = catalog.CatalogSha256, sourceCatalogSha256 = catalog.SourceCatalogSha256,
+        dictionarySha256 = catalog.DictionarySha256, profileFingerprint = model?.ProfileFingerprint ?? EmbeddingProfileDescriptor.MultilingualE5Base.ProfileFingerprint,
+        tokenAuditReport = tokenAuditPath, tokenAuditSha256 = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(tokenAuditPath))),
+        tokenAuditDocumentCount = tokenAudit.DocumentCount, maxRawTokenCount = tokenAudit.MaximumRawTokenCount,
+        englishTruncatedCount = tokenAudit.EnglishTruncatedCount, serbianTruncatedCount = tokenAudit.SerbianTruncatedCount,
+        modelLoadMilliseconds = loadMilliseconds, loadedWorkingSetBytes, peakWorkingSetBytes = process.PeakWorkingSet64,
+        encoderInstanceCount = model is null ? 0 : 1, inferenceRunCount = model?.InferenceRunCount ?? 0,
+        pocV2ReuseRequested = validatedPocV2 is not null, pocV2SeededRows = seeded,
+        languages = new[] { new { language = "en", generated = en.Generated, reused = en.Reused, count = en.RecordCount, elapsedMilliseconds = en.ElapsedMilliseconds },
+            new { language = "sr", generated = sr.Generated, reused = sr.Reused, count = sr.RecordCount, elapsedMilliseconds = sr.ElapsedMilliseconds } },
+        totalDocumentMilliseconds = en.ElapsedMilliseconds + sr.ElapsedMilliseconds
+    };
+    await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Paired full catalog complete: EN {en.RecordCount} (generated={en.Generated}, reused={en.Reused}), SR {sr.RecordCount} (generated={sr.Generated}, reused={sr.Reused}); encoder instances={(model is null ? 0 : 1)}; report={reportPath}");
 }
 
 internal sealed record ProbeInputs(string[] En, string[] Sr);

@@ -23,13 +23,14 @@ Each option is a unique `--name value` pair. Paths must be absolute. Unknown opt
 
 ```text
 extract-tags --catalog <absolute-jsonl> --output-dir <new-absolute-dir>
-propose --tags <absolute-json-array> --python <absolute-venv-python> --model-dir <absolute-pinned-model-dir> --checkpoint <absolute-jsonl> --output-dir <new-absolute-dir> [--max-items <1..6>]
+propose --tags <absolute-json-array> --python <absolute-venv-python> --model-dir <absolute-pinned-model-dir> --checkpoint <absolute-jsonl> --output-dir <new-absolute-dir> [--max-items <1..993>]
 qa --dictionary <absolute-dictionary-json> --output-dir <new-absolute-dir>
 apply-review --dictionary <absolute-dictionary-json> --review <absolute-review-json> --output-dir <new-absolute-dir>
 lock --dictionary <absolute-dictionary-json> --source-tags <absolute-json-array> --output-dir <new-absolute-dir>
+lock-full --candidate <absolute-raw-993-candidate> --baseline <absolute-pinned-418-baseline> --proposals <absolute-575-proposal-dictionary> --source-tags <absolute-993-array> --catalog <absolute-protected-9730-jsonl> --review <absolute-main-review-json> --output-dir <new-immutable-release-dir>
 ```
 
-Catalog input is UTF-8 JSONL with a `relevantTags` array of objects containing string `name` values. Extraction emits ordinal unique source tags and a deterministic source hash. Proposal input is a JSON string array. The Phase 2 smoke run remains checkpoint-compatible and unchanged. For the explicitly authorized Serbian Phase 3 POC only, proposal, review, and lock commands are bounded to at most 418 exact selected tags; the runner validates the supplied bounded keys and does not perform whole-catalog translation implicitly. Never use this allowance to translate the full production tag vocabulary.
+Catalog input is UTF-8 JSONL with a `relevantTags` array of objects containing string `name` values. Extraction emits ordinal unique source tags and a deterministic source hash. Proposal input is a JSON string array. The Phase 2 six-phrase smoke behavior remains checkpoint-compatible and unchanged. Default proposal behavior remains conservatively bounded to 418 keys. For the explicitly authorized Phase 7 dictionary development run, an explicit `--max-items 575` permits exactly the 575 missing source keys; the proposal runner rejects more than 575 in one process and never silently truncates. Lock validation accepts at most the complete 993-key canonical dictionary. Counts do not waive exact-key, checkpoint-identity, preservation, or review requirements.
 
 `propose` appends each completed row only after validating its JSONL response and includes model/revision/target/decoding/runtime-lock/model-artifact/normalizer identity in the checkpoint header and every row. Compatible completed rows resume; failed rows retry; incompatible rows are not reused by English key. A truncated final record is dropped before appending. A corrupt header is backed up and only per-row identity-verified completed rows are retained. Cancellation kills only the child process tree started for that command.
 
@@ -46,3 +47,11 @@ dotnet test --project tests/CineKros.Translator.Tests/CineKros.Translator.Tests.
 ```
 
 The focused suite uses only tiny fixtures and fakes. The real-model smoke is a separate explicit six-key run recorded under local planning reports; it is never part of ordinary tests.
+
+## Full Phase 7 release path
+
+lock-full is an additive release path; it does not relax ordinary lock or its strict ReadDictionary property checks. It accepts only the frozen 993-entry candidate, 418-entry baseline, 575-entry proposal, canonical source-tag set and protected catalog identities. The hash-bound MAIN review uses schema sr-phase-07-main-review-v1 and explicit per-key dispositions (corrected, accepted_unchanged, ambiguous_general, or retained_baseline) with rationale and confidence. Every initial QA/context flag must be dispositioned, and all 418 baseline keys require explicit retained_baseline decisions with their exact existing Serbian value. Baseline entry values/statuses are kept, while their complete source document and provenance extensions are copied losslessly to review-provenance.json. New proposals preserve raw machine output; approved new entries are reviewed, and unflagged/unreviewed new entries are auto_pass only when final QA is clear. Corrections that create an uncovered final QA flag stop the release.
+
+The lock-full path has a separate strict raw reader for the full candidate: it validates the five standard entry fields and permits only the two declared Phase 6T baseline extensions, previousAccepted and correctionProvenance, on the pinned baseline rows. Those 24 original extensions remain on the corresponding final dictionary entries and are also retained in the baseline provenance sidecar. No arbitrary unknown property is accepted. The ordinary strict ReadDictionary remains unchanged and will reject those extension-bearing entries rather than silently dropping them.
+
+The full path writes only a new immutable release directory containing the standard five-field dictionary, its content hash, review provenance, QA report, deterministic manifest and an in-memory catalog compatibility report. Compatibility validation visits all 9,730 source movies in source order and maps each selected English tag to Serbian while retaining the original English key, movie metadata and selected-tag score; no catalog or bilingual catalog is written, and genres are not incorporated into Serbian tag text. Phase 8 remains a separate task.

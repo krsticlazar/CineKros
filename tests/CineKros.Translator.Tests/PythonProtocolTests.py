@@ -22,13 +22,13 @@ class PythonProtocolTests(unittest.TestCase):
             }),
         )
 
-    def test_protocol_accepts_418_unique_tags_then_rejects_the_419th(self):
+    def test_protocol_accepts_575_unique_tags_then_rejects_the_576th(self):
         seen = set()
-        for index in range(418):
+        for index in range(575):
             TRANSLATE._register_job(f"selected tag {index}", seen)
-        self.assertEqual(418, len(seen))
+        self.assertEqual(575, len(seen))
         with self.assertRaisesRegex(ValueError, "duplicate_or_over_limit_job"):
-            TRANSLATE._register_job("selected tag 418", seen)
+            TRANSLATE._register_job("selected tag 575", seen)
 
     def test_protocol_rejects_duplicate_even_below_cap(self):
         seen = {"selected tag"}

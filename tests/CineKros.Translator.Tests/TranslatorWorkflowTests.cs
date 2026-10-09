@@ -19,9 +19,15 @@ public sealed class TranslatorWorkflowTests
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "C:\\in", "--output-dir", "C:\\out", "--wat", "x"]));
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "C:\\in", "--catalog", "C:\\in2", "--output-dir", "C:\\out"]));
         Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["extract-tags", "--catalog", "in.jsonl", "--output-dir", "C:\\out"]));
-        Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "419"]));
+        Assert.Throws<CommandLineException>(() => CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "994"]));
+        var phase7 = CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "575"]);
+        Assert.AreEqual("575", phase7["max-items"]);
         var boundedPoc = CommandArguments.Parse(["propose", "--tags", "C:\\tags", "--python", "C:\\python.exe", "--model-dir", "C:\\model", "--checkpoint", "C:\\checkpoint", "--output-dir", "C:\\out", "--max-items", "418"]);
         Assert.AreEqual("418", boundedPoc["max-items"]);
+        var fullLock = CommandArguments.Parse(["lock-full", "--candidate", "C:\\candidate.json", "--baseline", "C:\\baseline.json",
+            "--proposals", "C:\\proposals.json", "--source-tags", "C:\\tags.json", "--catalog", "C:\\catalog.jsonl",
+            "--review", "C:\\review.json", "--output-dir", "C:\\release"]);
+        Assert.AreEqual("lock-full", fullLock.Command);
     }
 
     [TestMethod]
@@ -274,8 +280,35 @@ public sealed class TranslatorWorkflowTests
         Assert.IsNotNull(incomplete);
         Assert.IsFalse(incomplete.Completed);
         Assert.AreEqual("incomplete_generation", incomplete.Error);
-        var overLimit = Enumerable.Range(0, 419).Select(index => new ProtocolJob($"selected tag {index}", $"selected tag {index}", TranslatorConstants.TargetToken, TranslatorConstants.DecodingId)).ToArray();
+        var overLimit = Enumerable.Range(0, 576).Select(index => new ProtocolJob($"selected tag {index}", $"selected tag {index}", TranslatorConstants.TargetToken, TranslatorConstants.DecodingId)).ToArray();
         await Assert.ThrowsAsync<InvalidDataException>(() => PythonTranslationProcess.RunFixtureForTestsAsync(executable, fixture, "valid", overLimit, ignore, TimeSpan.FromSeconds(5), CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task OnePersistentChildAcceptsAll575Phase7Jobs()
+    {
+        var fixture = Path.Combine(AppContext.BaseDirectory, "ProtocolFixtureRunner.dll");
+        var jobs = Enumerable.Range(0, 575)
+            .Select(index => new ProtocolJob($"selected tag {index:D3}", $"selected tag {index:D3}", TranslatorConstants.TargetToken, TranslatorConstants.DecodingId))
+            .ToArray();
+        var responseCount = 0;
+        await PythonTranslationProcess.RunFixtureForTestsAsync(
+            "dotnet", fixture, "valid", jobs,
+            (_, _) => { responseCount++; return Task.CompletedTask; },
+            TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.AreEqual(575, responseCount);
+    }
+
+    [TestMethod]
+    public void ExplicitPhase7ProposalAndFullDictionaryBoundsAreExactAndNeverTruncate()
+    {
+        TagWorkflow.ValidateProposalBatchSize(418, 418);
+        TagWorkflow.ValidateProposalBatchSize(575, 575);
+        Assert.Throws<InvalidDataException>(() => TagWorkflow.ValidateProposalBatchSize(419, 418));
+        Assert.Throws<InvalidDataException>(() => TagWorkflow.ValidateProposalBatchSize(576, 993));
+        Assert.Throws<InvalidDataException>(() => TagWorkflow.ValidateProposalBatchSize(575, 574));
+        TagWorkflow.ValidateFullDictionarySize(993);
+        Assert.Throws<InvalidDataException>(() => TagWorkflow.ValidateFullDictionarySize(994));
     }
 
     [TestMethod]

@@ -4,6 +4,10 @@ namespace CineKros.Translator;
 
 public static class TranslatorConstants
 {
+    public const int MaxBoundedPocTags = 418;
+    public const int MaxPhase7MissingProposals = 575;
+    public const int MaxFullDictionaryTags = 993;
+
     public const string ModelId = "Helsinki-NLP/opus-mt-en-sla";
     public const string ModelRevision = "0bc26914f2f82c3dd5b235e420aa2c711a5ed3d8";
     public const string TargetToken = ">>srp_Latn<<";

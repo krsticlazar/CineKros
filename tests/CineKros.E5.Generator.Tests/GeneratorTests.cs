@@ -289,6 +289,167 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public void Run_FullCatalogUsesIndependentIdentityBoundCheckpointsAndReplaysWithoutInference()
+    {
+        using var temp = new TempRoot();
+        var movies = new[]
+        {
+            new FullBilingualMovie(new MovieRow(1, "tt0000001", 1, "One", 2001, null, "en", ["Drama"], null, null, null), "One, 2001", "Један, 2001", ["Драма"]),
+            new FullBilingualMovie(new MovieRow(2, "tt0000002", 2, "Two", 2002, null, "en", ["Mystery"], null, null, null), "Two, 2002", "Два, 2002", ["Мистерија"])
+        };
+        var catalog = new FullBilingualCatalogDocument(Path.Combine(temp.Root, "catalog.jsonl"), new string('a', 64),
+            Path.Combine(temp.Root, "source.jsonl"), new string('b', 64), new string('c', 64), Path.Combine(temp.Root, "dictionary.json"),
+            new string('d', 64), new string('e', 64), new string('f', 64), new string('1', 64), new string('2', 64), "{}", movies);
+        var source = new FakeSource(profileDescriptor: EmbeddingProfileDescriptor.MultilingualE5Base);
+        var enCheckpoint = Path.Combine(temp.Root, "en", "checkpoint.jsonl");
+        var srCheckpoint = Path.Combine(temp.Root, "sr", "checkpoint.jsonl");
+        var enOutput = Path.Combine(temp.Root, "en", "published");
+        var srOutput = Path.Combine(temp.Root, "sr", "published");
+        var en = DocumentVectorGenerator.RunFullCatalog(enCheckpoint, enOutput, 1, source, catalog, "en");
+        Assert.AreEqual(2, en.Generated); Assert.AreEqual(2, en.RecordCount);
+        using var enHeader = JsonDocument.Parse(File.ReadLines(enCheckpoint).First());
+        Assert.AreEqual("multilingual-full-document-checkpoint-v1", enHeader.RootElement.GetProperty("format").GetString());
+        Assert.AreEqual(catalog.CatalogSha256, enHeader.RootElement.GetProperty("catalogSha256").GetString());
+        Assert.AreEqual(catalog.DictionarySha256, enHeader.RootElement.GetProperty("dictionarySha256").GetString());
+        var enArtifactPath = Path.Combine(enOutput, "document-vectors.jsonl");
+        var enArtifactBytes = File.ReadAllBytes(enArtifactPath);
+        source.BatchSizes.Clear();
+        var completedEn = DocumentVectorGenerator.RunFullCatalog(enCheckpoint, enOutput, 1, source, catalog, "en");
+        Assert.AreEqual(0, completedEn.Generated); Assert.AreEqual(2, completedEn.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+        CollectionAssert.AreEqual(enArtifactBytes, File.ReadAllBytes(enArtifactPath), "A verified completion is preserved byte-for-byte on paired resume.");
+        Assert.ThrowsExactly<InvalidDataException>(() => DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog with { IdentitySha256 = new string('3', 64) }, "en", enOutput));
+        File.WriteAllBytes(enArtifactPath, [.. enArtifactBytes, 0x20]);
+        Assert.ThrowsExactly<InvalidDataException>(() => DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog, "en", enOutput),
+            "A modified already-published artifact must be rejected, not silently resumed or replaced.");
+        File.WriteAllBytes(enArtifactPath, enArtifactBytes);
+        var enManifestPath = Path.Combine(enOutput, "manifest.json");
+        var manifestBytes = File.ReadAllBytes(enManifestPath);
+        foreach (var mutation in new Action<JsonObject>[]
+        {
+            root => root["translationDictionarySha256"] = new string('4', 64),
+            root => root["inputNormalizationVersion"] = "wrong-normalizer",
+            root => root["truncatedRecords"] = 1
+        })
+        {
+            var changedManifest = JsonNode.Parse(manifestBytes)!.AsObject(); mutation(changedManifest);
+            File.WriteAllBytes(enManifestPath, Encoding.UTF8.GetBytes(changedManifest.ToJsonString()));
+            Assert.ThrowsExactly<InvalidDataException>(() => DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog, "en", enOutput),
+                "Every full manifest identity/processing field must match even when vector bytes are unchanged.");
+        }
+        File.WriteAllBytes(enManifestPath, manifestBytes);
+        source.BatchSizes.Clear();
+        var sr = DocumentVectorGenerator.RunFullCatalog(srCheckpoint, srOutput, 1, source, catalog, "sr");
+        Assert.AreEqual(2, sr.Generated); Assert.AreEqual(2, sr.RecordCount);
+        CollectionAssert.AreEqual(new[] { 1, 1 }, source.BatchSizes.ToArray(), "After the EN publication, resume computes only the pending SR language.");
+        source.BatchSizes.Clear();
+        var enReplay = DocumentVectorGenerator.RunFullCatalog(enCheckpoint, Path.Combine(temp.Root, "en-replay"), 1, source, catalog, "en");
+        Assert.AreEqual(0, enReplay.Generated); Assert.AreEqual(2, enReplay.Reused); Assert.AreEqual(0, source.BatchSizes.Count);
+        var enRow = JsonDocument.Parse(File.ReadLines(Path.Combine(enOutput, "document-vectors.jsonl")).First()).RootElement;
+        var srRow = JsonDocument.Parse(File.ReadLines(Path.Combine(srOutput, "document-vectors.jsonl")).First()).RootElement;
+        Assert.AreNotEqual(enRow.GetProperty("fingerprint").GetString(), srRow.GetProperty("fingerprint").GetString());
+    }
+
+    [TestMethod]
+    public async Task PublishedFullCatalogSample16ReproducesStoredVectorsWithOneFreshEncoder_WhenExplicitRootsAreSet()
+    {
+        var workspaceRoot = Environment.GetEnvironmentVariable("CINEKROS_P8_FULLCATALOG_ROOT");
+        var vectorRoot = Environment.GetEnvironmentVariable("CINEKROS_P8_VECTOR_ROOT");
+        var modelRoot = Environment.GetEnvironmentVariable("CINEKROS_P8_MODEL_ROOT");
+        if (string.IsNullOrWhiteSpace(workspaceRoot) && string.IsNullOrWhiteSpace(vectorRoot) && string.IsNullOrWhiteSpace(modelRoot))
+            Assert.Inconclusive("Set all three CINEKROS_P8_*_ROOT variables to run read-only full-catalog sample reproduction.");
+        if (string.IsNullOrWhiteSpace(workspaceRoot) || string.IsNullOrWhiteSpace(vectorRoot) || string.IsNullOrWhiteSpace(modelRoot) ||
+            !Path.IsPathFullyQualified(workspaceRoot) || !Path.IsPathFullyQualified(vectorRoot) || !Path.IsPathFullyQualified(modelRoot))
+            Assert.Fail("All three CINEKROS_P8_*_ROOT values must be explicit absolute paths.");
+
+        var root = Path.GetFullPath(workspaceRoot);
+        var vectors = Path.GetFullPath(vectorRoot);
+        var modelPath = Path.GetFullPath(modelRoot);
+        var catalogPath = Path.Combine(root, "database", "data", "derived", "final", "sr-search-v1", "sr-p8-full-01", "catalog", "movies-catalog.jsonl");
+        var catalogManifest = Path.Combine(Path.GetDirectoryName(catalogPath)!, "manifest.json");
+        var dictionary = Path.Combine(root, "database", "data", "derived", "translations", "sr-latn-v1-r1", "tag-translations-sr.json");
+        var sourceCatalog = Path.Combine(root, "database", "data", "derived", "final", "b05a-real-tmdb-01", "movies-catalog.jsonl");
+        var catalog = await FullBilingualCatalog.LoadAsync(catalogPath, catalogManifest, dictionary, sourceCatalog);
+        var expectedProfile = EmbeddingProfileDescriptor.MultilingualE5Base;
+        Assert.AreEqual(9730, catalog.Movies.Count);
+
+        foreach (var language in new[] { "en", "sr" })
+        {
+            var validated = DocumentVectorGenerator.ValidatePublishedFullCatalog(catalog, language, Path.Combine(vectors, language, "published"));
+            Assert.IsNotNull(validated, $"The {language} full artifact must already be complete and validated.");
+            Assert.AreEqual(9730, validated.RecordCount);
+        }
+
+        var sampleIds = new long[] { 1, 2, 1083, 2754, 5539, 31878, 107348, 108932 };
+        var movies = catalog.Movies.ToDictionary(x => x.MovieLensId);
+        var cases = new List<SampleVectorComparison>(16);
+        var artifactHashes = new Dictionary<string, object>(StringComparer.Ordinal);
+        using var model = new E5EmbeddingModel(modelPath, expectedProfile);
+        Assert.AreEqual(expectedProfile.ProfileFingerprint, model.ProfileFingerprint);
+        foreach (var language in new[] { "en", "sr" })
+        {
+            var artifactPath = Path.Combine(vectors, language, "published", "document-vectors.jsonl");
+            var manifestPath = Path.Combine(vectors, language, "published", "manifest.json");
+            artifactHashes[language] = new
+            {
+                vectorsSha256 = HashFile(artifactPath), manifestSha256 = HashFile(manifestPath)
+            };
+            var wanted = sampleIds.ToHashSet();
+            var rows = new Dictionary<long, SampleVectorRow>();
+            foreach (var line in File.ReadLines(artifactPath, new UTF8Encoding(false, true)))
+            {
+                using var rowJson = JsonDocument.Parse(line);
+                var id = rowJson.RootElement.GetProperty("movieLensId").GetInt64();
+                if (!wanted.Contains(id)) continue;
+                var row = JsonSerializer.Deserialize<SampleVectorRow>(line,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidDataException("Malformed published vector row.");
+                if (!rows.TryAdd(id, row)) throw new InvalidDataException($"Duplicate sampled vector ID {id}.");
+            }
+            Assert.AreEqual(sampleIds.Length, rows.Count, $"All fixed {language} sample IDs must exist in the artifact.");
+            foreach (var id in sampleIds)
+            {
+                var movie = movies[id];
+                var text = language == "en" ? movie.SemanticText : movie.SemanticTextSr;
+                var row = rows[id];
+                var fingerprint = MultilingualPocCatalog.ComputeDocumentFingerprint(language,
+                    language == "en" ? catalog.EnTextFormatVersion : catalog.SrTextFormatVersion, text);
+                var textHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+                Assert.AreEqual(fingerprint, row.Fingerprint, $"{language}/{id} fingerprint");
+                Assert.AreEqual(textHash, row.SemanticTextSha256, $"{language}/{id} semantic text hash");
+                var reproduced = model.EmbedDocuments([text])[0];
+                var differing = new List<int>(); var maxAbs = 0d; double dot = 0, leftNorm = 0, rightNorm = 0;
+                for (var dimension = 0; dimension < reproduced.Length; dimension++)
+                {
+                    if (BitConverter.SingleToInt32Bits(reproduced[dimension]) != BitConverter.SingleToInt32Bits(row.Vector[dimension])) differing.Add(dimension);
+                    maxAbs = Math.Max(maxAbs, Math.Abs((double)reproduced[dimension] - row.Vector[dimension]));
+                    dot += (double)reproduced[dimension] * row.Vector[dimension];
+                    leftNorm += (double)reproduced[dimension] * reproduced[dimension];
+                    rightNorm += (double)row.Vector[dimension] * row.Vector[dimension];
+                }
+                cases.Add(new SampleVectorComparison(language, id, fingerprint, textHash, differing.Count == 0, differing.Count,
+                    differing.Take(32).ToArray(), maxAbs, dot / Math.Sqrt(leftNorm * rightNorm), reproduced, row.Vector));
+            }
+        }
+
+        var report = new
+        {
+            format = "full-catalog-sample-vector-reproduction-v1", catalogIdentitySha256 = catalog.IdentitySha256,
+            catalogSha256 = catalog.CatalogSha256, sourceCatalogSha256 = catalog.SourceCatalogSha256,
+            dictionarySha256 = catalog.DictionarySha256, profileFingerprint = model.ProfileFingerprint,
+            onnxSha256 = expectedProfile.Artifact("model_qint8_avx512_vnni.onnx").Sha256,
+            tokenizerSha256 = expectedProfile.Artifact("tokenizer.json").Sha256, encoderInstances = 1,
+            inferenceCalls = model.InferenceRunCount, sampleMovieLensIds = sampleIds,
+            artifacts = artifactHashes, languages = new[] { "en", "sr" }, allBitwiseIdentical = cases.All(x => x.BitwiseIdentical), cases
+        };
+        var reportDirectory = Path.Combine(root, ".local", "planning", "reports", "sr-phase-08", "generation");
+        Directory.CreateDirectory(reportDirectory);
+        var reportPath = Path.Combine(reportDirectory, "sample-vector-reproduction-" + DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ", System.Globalization.CultureInfo.InvariantCulture) + ".json");
+        await File.WriteAllBytesAsync(reportPath, JsonSerializer.SerializeToUtf8Bytes(report, new JsonSerializerOptions { WriteIndented = true }));
+        Assert.AreEqual(16, cases.Count);
+        Assert.AreEqual(16, model.InferenceRunCount, "Samples are reproduced individually with batch size one on one encoder instance.");
+        Assert.IsTrue(cases.All(x => x.BitwiseIdentical), $"Bitwise vector reproduction mismatch; exact differences are persisted at {reportPath}.");
+    }
+
+    [TestMethod]
     public void Run_PublishFailureLeavesCheckpointAndNoFinalDirectory()
     {
         using var f = new Fixture(); var checkpointBytes = Array.Empty<byte>();
@@ -332,6 +493,12 @@ public sealed class GeneratorTests
         Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--language", "xx", "--dictionary", "f", "--source-catalog", "g"]));
         var multilingual = GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--language", "sr", "--dictionary", "f", "--source-catalog", "g"]);
         Assert.AreEqual("sr", multilingual.Language);
+        var full = GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--language", "en", "--dictionary", "f", "--source-catalog", "g", "--full-catalog", "true"]);
+        Assert.IsTrue(full.FullCatalog);
+        var pairedFull = GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--dictionary", "f", "--source-catalog", "g", "--paired-full", "true", "--token-audit-only", "true"]);
+        Assert.IsTrue(pairedFull.PairedFull);
+        Assert.IsTrue(pairedFull.TokenAuditOnly);
+        Assert.ThrowsExactly<ArgumentException>(() => GeneratorArguments.Parse(["--catalog", "a", "--manifest", "b", "--model-dir", "c", "--output-dir", "d", "--checkpoint", "e", "--profile", "multilingual-e5-base-int8-onnx-v1", "--batch-size", "1", "--dictionary", "f", "--source-catalog", "g", "--paired-full", "true", "--language", "en"]));
     }
 
     [TestMethod]
@@ -361,6 +528,12 @@ public sealed class GeneratorTests
         }
         Assert.Inconclusive("Pinned local ONNX fixture is not installed in this workspace.");
         return string.Empty;
+    }
+
+    private static string HashFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexStringLower(SHA256.HashData(stream));
     }
 
     private static string FindCanonicalCatalog()
@@ -430,6 +603,11 @@ public sealed class GeneratorTests
         }
         public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+
+    private sealed record SampleVectorRow(long MovieLensId, string Fingerprint, string SemanticTextSha256, float[] Vector);
+    private sealed record SampleVectorComparison(string Language, long MovieLensId, string Fingerprint, string SemanticTextSha256,
+        bool BitwiseIdentical, int DifferingDimensions, int[] FirstDifferingDimensions, double MaxAbsoluteDifference, double Cosine,
+        float[] ReproducedVector, float[] PublishedVector);
     private sealed class TempRoot : IDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "e5-poc-test-" + Guid.NewGuid().ToString("N"));
