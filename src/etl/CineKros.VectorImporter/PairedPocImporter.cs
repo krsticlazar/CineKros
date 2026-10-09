@@ -10,6 +10,7 @@ namespace CineKros.VectorImporter;
 public static class PairedPocImporter
 {
     public const string DatabaseName = "cinekros_sr_poc_phase04_20261008";
+    public const string CorrectedDatabaseName = "cinekros_sr_poc_phase06t_v2_20261009";
     private const string Profile = MultilingualPocCatalog.ProfileFingerprint;
 
     public static async Task<string> ImportAsync(string connectionString, string catalogPath, string manifestPath,
@@ -19,6 +20,26 @@ public static class PairedPocImporter
         var catalog = await MultilingualPocCatalog.LoadAsync(catalogPath, manifestPath, dictionaryPath, sourceCatalogPath, cancellationToken);
         var en = MultilingualPocCatalog.ValidateVectorArtifact(Path.Combine(enDirectory, "document-vectors.jsonl"), Path.Combine(enDirectory, "manifest.json"), catalog, "en");
         var sr = MultilingualPocCatalog.ValidateVectorArtifact(Path.Combine(srDirectory, "document-vectors.jsonl"), Path.Combine(srDirectory, "manifest.json"), catalog, "sr");
+        return await ImportValidatedAsync(connectionString, catalog, en, sr, enDirectory, srDirectory, DatabaseName, "cinekros_sr_poc_phase04_test_", failAfterVectorRows, cancellationToken);
+    }
+
+    public static async Task<string> ImportCorrectedAsync(string connectionString, string catalogPath, string manifestPath,
+        string dictionaryPath, string approvedMappingPath, string baseCatalogPath, string baseManifestPath, string baseDictionaryPath,
+        string sourceCatalogPath, string enDirectory, string srDirectory, int? failAfterVectorRows = null,
+        CancellationToken cancellationToken = default)
+    {
+        var catalog = await CorrectedPocCatalog.LoadAsync(catalogPath, manifestPath, dictionaryPath, approvedMappingPath,
+            baseCatalogPath, baseManifestPath, baseDictionaryPath, sourceCatalogPath, cancellationToken);
+        var en = MultilingualPocCatalog.ValidateVectorArtifact(Path.Combine(enDirectory, "document-vectors.jsonl"), Path.Combine(enDirectory, "manifest.json"), catalog, "en");
+        var sr = MultilingualPocCatalog.ValidateVectorArtifact(Path.Combine(srDirectory, "document-vectors.jsonl"), Path.Combine(srDirectory, "manifest.json"), catalog, "sr");
+        return await ImportValidatedAsync(connectionString, catalog, en, sr, enDirectory, srDirectory,
+            CorrectedDatabaseName, "cinekros_sr_poc_phase06t_test_", failAfterVectorRows, cancellationToken);
+    }
+
+    private static async Task<string> ImportValidatedAsync(string connectionString, MultilingualPocCatalogDocument catalog,
+        MultilingualPocArtifactValidation en, MultilingualPocArtifactValidation sr, string enDirectory, string srDirectory,
+        string expectedDatabase, string testDatabasePrefix, int? failAfterVectorRows, CancellationToken cancellationToken)
+    {
         var enRows = ReadVectors(Path.Combine(enDirectory, "document-vectors.jsonl"));
         var srRows = ReadVectors(Path.Combine(srDirectory, "document-vectors.jsonl"));
         if (enRows.Count != 150 || srRows.Count != 150 || enRows.Where((r, i) => r.Id != srRows[i].Id || r.Id != catalog.Movies[i].MovieLensId || r.Fingerprint != en.Rows[i].Fingerprint || srRows[i].Fingerprint != sr.Rows[i].Fingerprint).Any())
@@ -28,7 +49,7 @@ public static class PairedPocImporter
         builder.UseVector();
         await using var source = builder.Build();
         await using var connection = await source.OpenConnectionAsync(cancellationToken);
-        await VerifyDatabaseAsync(connection, cancellationToken);
+        await VerifyDatabaseAsync(connection, expectedDatabase, testDatabasePrefix, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -94,15 +115,19 @@ public static class PairedPocImporter
         return list;
     }
 
-    private static async Task VerifyDatabaseAsync(NpgsqlConnection connection, CancellationToken ct)
+    private static async Task VerifyDatabaseAsync(NpgsqlConnection connection, string expectedDatabase, string testDatabasePrefix, CancellationToken ct)
     {
         await using var command = new NpgsqlCommand("SELECT current_database(), current_setting('server_version_num')::int, EXISTS(SELECT 1 FROM pg_extension WHERE extname='vector'), to_regclass('movie_embeddings') IS NOT NULL, EXISTS(SELECT 1 FROM schema_migrations WHERE version='002_serbian_search_vectors')", connection);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct) ||
-            (reader.GetString(0) != DatabaseName && !System.Text.RegularExpressions.Regex.IsMatch(reader.GetString(0), "^cinekros_sr_poc_phase04_test_[a-z0-9_]+$")) ||
+            !IsAllowedTargetDatabase(reader.GetString(0), expectedDatabase, testDatabasePrefix) ||
             reader.GetInt32(1) < 170000 || !reader.GetBoolean(2) || !reader.GetBoolean(3) || !reader.GetBoolean(4))
             throw new InvalidOperationException("Actual database identity/schema is not the approved migrated Serbian POC target.");
     }
+
+    public static bool IsAllowedTargetDatabase(string currentDatabase, string expectedDatabase, string testDatabasePrefix) =>
+        currentDatabase == expectedDatabase || System.Text.RegularExpressions.Regex.IsMatch(currentDatabase,
+            "^" + System.Text.RegularExpressions.Regex.Escape(testDatabasePrefix) + "[a-z0-9_]+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static async Task AdaptPocCountGuardAsync(NpgsqlConnection c, NpgsqlTransaction tx, CancellationToken ct)
     {

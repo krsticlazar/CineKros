@@ -34,6 +34,42 @@ public sealed class ParserV5PromptContractTests
     }
 
     [TestMethod]
+    public void PromptPreservesSuppliedLatinProperNameSurfaceWithoutChangingInflectedInputHandling()
+    {
+        var prompt = ReadPrompt();
+        StringAssert.Contains(prompt, "When the user's message provides a recognizable Latin-script actor, director, or title spelling in its base form, preserve that spelling exactly in `semanticQuery`");
+        StringAssert.Contains(prompt, "do not add Serbian case endings to it");
+        StringAssert.Contains(prompt, "including when the surrounding Serbian sentence is in Cyrillic");
+        StringAssert.Contains(prompt, "A Serbian-inflected or possessive name supplied by the user remains a valid input");
+        StringAssert.Contains(prompt, "this rule does not change or reject such input, which continues through the existing interpretation behavior");
+        StringAssert.Contains(prompt, "Do not add external name lookups or a local/backend name-canonicalization step");
+        Assert.IsFalse(prompt.Contains("must not be rejected or rewritten", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void PromptRequiresSelectedLanguageForMeaningWordsWhileKeepingNamesAndTitlesAsSpans()
+    {
+        var prompt = ReadPrompt();
+        StringAssert.Contains(prompt, "HIGH-PRIORITY SEMANTIC LANGUAGE RULE");
+        StringAssert.Contains(prompt, "write every natural-language word in a non-null `semanticQuery` in the selected language");
+        StringAssert.Contains(prompt, "prefer Serbian Latin script, while Serbian Cyrillic is also valid");
+        StringAssert.Contains(prompt, "A copied proper-name or title span does not make surrounding English wording valid Serbian");
+        StringAssert.Contains(prompt, "do not copy English role phrases such as `directed by` or `starring` into Serbian semantic text");
+        StringAssert.Contains(prompt, "English examples elsewhere in this prompt describe EN-mode behavior only");
+        StringAssert.Contains(prompt, "SR `Nežna priča o pronađenoj porodici, poput The Quiet Harbor`");
+        StringAssert.Contains(prompt, "`nežna priča o pronađenoj porodici, nalik naslovu The Quiet Harbor`");
+        StringAssert.Contains(prompt, "EN `a film starring Tilda Swinton` → `a film starring Tilda Swinton`");
+        StringAssert.Contains(prompt, "SR `film u kojem glumi glumica Tilda Swinton` → `film u kojem glumi Tilda Swinton`");
+        StringAssert.Contains(prompt, "EN `a quiet film directed by Denis Villeneuve` → `a quiet film directed by Denis Villeneuve`");
+        StringAssert.Contains(prompt, "SR `tih film čiji je reditelj Denis Villeneuve` → `tih film koji je režirao Denis Villeneuve`");
+        StringAssert.Contains(prompt, "These names are generic development examples, not special cases");
+        StringAssert.Contains(prompt, "SR `Nešto napeto, sa pričom o osveti`");
+        StringAssert.Contains(prompt, "If the user's input supplies an inflected name, accept it without rejecting it; when its original base spelling is confidently recognizable from the input, use that original spelling with Serbian surrounding grammar");
+        StringAssert.Contains(prompt, "when it is not confidently recognizable, do not invent or corrupt an identity");
+        StringAssert.Contains(prompt, "Do not add external name lookups or backend entity canonicalization");
+    }
+
+    [TestMethod]
     public void PromptDefinesUnsupportedExclusionEnvelopeAndLanguagePrecedence()
     {
         var prompt = ReadPrompt();

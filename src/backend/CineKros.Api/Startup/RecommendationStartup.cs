@@ -59,8 +59,8 @@ public static class RecommendationStartup
 
     public static void ValidatePocDatabaseTarget(string? configuredDatabase)
     {
-        if (configuredDatabase != "cinekros_sr_poc_phase04_20261008")
-            throw new InvalidOperationException("The Serbian POC database connection must target the exact retained Phase 4 database.");
+        if (configuredDatabase != SearchDatasetExpectation.CorrectedV2Database)
+            throw new InvalidOperationException("The current Serbian POC must target the exact corrected Phase 6T v2 database.");
     }
 
     private static void ValidatePocConnectionString(string connectionString)
@@ -94,7 +94,7 @@ public static class RecommendationStartup
         services.AddSingleton<IRealQueryEmbeddingProvider, E5QueryEmbeddingAdapter>();
         services.AddSingleton<NpgsqlDataSource>(_ => MovieSearchRepository.CreateDataSource(connectionString));
         if (serbianPoc)
-            services.AddSingleton(sp => MovieSearchRepository.CreatePocRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
+            services.AddSingleton(sp => MovieSearchRepository.CreateCorrectedPhase6TV2PocRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
         else
             services.AddSingleton(sp => new MovieSearchRepository(sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<E5EmbeddingModel>().ProfileFingerprint));
         services.AddSingleton<IRealMovieSearch, MovieSearchAdapter>();

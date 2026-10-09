@@ -18,7 +18,7 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
     public async Task<GeminiParserEvidenceResult> ParseWithEvidenceAsync(string language, string message, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        timeout.CancelAfter(TimeSpan.FromSeconds(languageAware ? 20 : 10));
         try
         {
             using var schema = JsonDocument.Parse(responseSchema);

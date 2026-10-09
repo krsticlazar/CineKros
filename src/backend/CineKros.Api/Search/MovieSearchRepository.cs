@@ -34,15 +34,24 @@ public sealed class MovieSearchRepository
     /// <summary>Creates an opt-in Phase 4 POC repository after verifying the live database identity.</summary>
     public static async Task<MovieSearchRepository> CreatePocRepositoryAsync(NpgsqlDataSource dataSource,
         CancellationToken cancellationToken = default)
+        => await CreatePocRepositoryAsync(dataSource, SearchDatasetExpectation.SerbianPhase4Poc, cancellationToken);
+
+    /// <summary>Creates the explicitly corrected Phase 6T v2 POC repository; never probes or falls back to v1.</summary>
+    public static async Task<MovieSearchRepository> CreateCorrectedPhase6TV2PocRepositoryAsync(NpgsqlDataSource dataSource,
+        CancellationToken cancellationToken = default)
+        => await CreatePocRepositoryAsync(dataSource, SearchDatasetExpectation.SerbianPhase6TV2Poc, cancellationToken);
+
+    private static async Task<MovieSearchRepository> CreatePocRepositoryAsync(NpgsqlDataSource dataSource,
+        Func<string, SearchDatasetExpectation> expectationFactory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand("SELECT current_database()", connection);
         var databaseName = (string?)await command.ExecuteScalarAsync(cancellationToken);
         SearchDatasetExpectation expectation;
-        try { expectation = SearchDatasetExpectation.SerbianPhase4Poc(databaseName ?? ""); }
+        try { expectation = expectationFactory(databaseName ?? ""); }
         catch (InvalidOperationException) { throw SearchUnavailable(); }
-        if (expectation.MovieCount != 150 || expectation.CatalogIdentity != SearchDatasetExpectation.ReleasedCatalogIdentitySha256)
+        if (expectation.MovieCount != 150 || string.IsNullOrWhiteSpace(expectation.CatalogSha256) || string.IsNullOrWhiteSpace(expectation.CatalogIdentity))
             throw SearchUnavailable();
         return new MovieSearchRepository(dataSource, expectation);
     }
@@ -121,8 +130,8 @@ public sealed class MovieSearchRepository
         var sql = $"SELECT current_database() = @db AND (SELECT count(*) FROM movies)=@n AND (SELECT count(*) FROM movie_embeddings)=@n AND (SELECT count(*) FROM movie_embeddings WHERE {embeddingColumn} IS NOT NULL AND {fingerprintColumn} ~ '^[0-9a-f]{{64}}$')=@n AND EXISTS(SELECT 1 FROM catalog_import_state WHERE id=1 AND catalog_version='B05a-bilingual-catalog-v2' AND btrim(catalog_jsonl_sha256)=@catalog AND btrim(catalog_content_fingerprint)=@identity AND movie_count=@n) AND EXISTS(SELECT 1 FROM embedding_set_state WHERE language=@lang AND btrim(profile_fingerprint)=@profile AND btrim(catalog_content_fingerprint)=@identity AND btrim(corpus_sha256)=@corpus AND text_format_version=@format AND btrim(artifact_sha256)=@artifact AND btrim(COALESCE(translation_dictionary_sha256,''))=@dictionary AND dimension=768 AND embedded_count=@n) AND (SELECT count(*) FROM embedding_set_state WHERE language=@lang)=1";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("db", e.DatabaseName); command.Parameters.AddWithValue("n", e.MovieCount);
-        command.Parameters.AddWithValue("catalog", CineKros.Catalog.Importer.MultilingualPocCatalog.CatalogSha256);
-        command.Parameters.AddWithValue("identity", SearchDatasetExpectation.ReleasedCatalogIdentitySha256);
+        command.Parameters.AddWithValue("catalog", e.CatalogSha256);
+        command.Parameters.AddWithValue("identity", e.CatalogIdentity);
         command.Parameters.AddWithValue("lang", language == SearchLanguage.English ? "en" : "sr"); command.Parameters.AddWithValue("profile", e.ProfileFingerprint);
         command.Parameters.AddWithValue("corpus", corpus); command.Parameters.AddWithValue("format", format); command.Parameters.AddWithValue("artifact", artifact);
         command.Parameters.AddWithValue("dictionary", language == SearchLanguage.English ? "" : e.DictionarySha256);
@@ -135,8 +144,8 @@ public sealed class MovieSearchRepository
         const string sql = "SELECT current_database()=@db AND (SELECT count(*) FROM movies)=@n AND EXISTS(SELECT 1 FROM catalog_import_state WHERE id=1 AND catalog_version='B05a-bilingual-catalog-v2' AND btrim(catalog_jsonl_sha256)=@catalog AND btrim(catalog_content_fingerprint)=@identity AND movie_count=@n)";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("db", e.DatabaseName); command.Parameters.AddWithValue("n", e.MovieCount);
-        command.Parameters.AddWithValue("catalog", CineKros.Catalog.Importer.MultilingualPocCatalog.CatalogSha256);
-        command.Parameters.AddWithValue("identity", SearchDatasetExpectation.ReleasedCatalogIdentitySha256);
+        command.Parameters.AddWithValue("catalog", e.CatalogSha256);
+        command.Parameters.AddWithValue("identity", e.CatalogIdentity);
         if (await command.ExecuteScalarAsync(ct) is not true || !await PocIdSetMatchesAsync(connection, ct)) throw SearchUnavailable();
     }
 

@@ -1,4 +1,20 @@
-# CineKros real query parser — prompt v5
+# CineKros real query parser — prompt v5 (post-evaluation revision: name-surface-v1)
+
+## HIGH-PRIORITY SEMANTIC LANGUAGE RULE
+
+After classifying the message and selecting the response branch, write every natural-language word in a non-null `semanticQuery` in the selected language. In EN mode, semantic text is English. In SR mode, semantic text is Serbian; prefer Serbian Latin script, while Serbian Cyrillic is also valid. This applies to role, relationship, mood, plot, style, and other meaning-bearing words, including words that describe a supplied actor, director, or title. A copied proper-name or title span does not make surrounding English wording valid Serbian.
+
+Keep supplied recognizable proper names and titles as literal spans when useful, and construct the surrounding phrase in the selected language. In Serbian, express roles and relations with Serbian words around the unchanged name/title; do not copy English role phrases such as `directed by` or `starring` into Serbian semantic text. Apply this rule to all people, titles, and semantic requests, not just the examples below. English examples elsewhere in this prompt describe EN-mode behavior only and never authorize English semantic phrases in SR mode.
+
+Examples (the output snippets illustrate only `semanticQuery`):
+- EN `a warm story about chosen family, like The Quiet Harbor` → `a warm story about chosen family, similar to The Quiet Harbor`.
+- SR `Nežna priča o pronađenoj porodici, poput The Quiet Harbor` → `nežna priča o pronađenoj porodici, nalik naslovu The Quiet Harbor`.
+- EN `a film starring Tilda Swinton` → `a film starring Tilda Swinton`.
+- SR `film u kojem glumi glumica Tilda Swinton` → `film u kojem glumi Tilda Swinton`.
+- EN `a quiet film directed by Denis Villeneuve` → `a quiet film directed by Denis Villeneuve`.
+- SR `tih film čiji je reditelj Denis Villeneuve` → `tih film koji je režirao Denis Villeneuve`.
+- SR `Nešto napeto, sa pričom o osveti` → `Nešto napeto, sa pričom o osveti`.
+- These names are generic development examples, not special cases. SR input in either script may contain a supplied base-form Latin name; preserve the name exactly and keep role/relationship words Serbian. If the user's input supplies an inflected name, accept it without rejecting it; when its original base spelling is confidently recognizable from the input, use that original spelling with Serbian surrounding grammar, and when it is not confidently recognizable, do not invent or corrupt an identity. Do not add external name lookups or backend entity canonicalization.
 
 ## ROLE AND LANGUAGE CHECK
 
@@ -23,6 +39,8 @@ For a `match`, determine whether the user requires excluding or negating an acto
 Exclusion examples that all use the exact matched `UNSUPPORTED_REQUEST` envelope: `film without Brad Pitt`, `not directed by Christopher Nolan`, `anything except Dr. Strangelove`, and `no horror`; Serbian Latin `Filmovi bez Brada Pitta`, `Ne želim filmove koje je režirao Christopher Nolan`, `Nešto osim filma Dr. Strangelove`, and `Bez horora`; Serbian Cyrillic `Филмови без Бреда Пита`, `Не желим филмове које је режирао Кристофер Нолан`, `Нешто осим филма Dr. Strangelove`, and `Без хорора`.
 
 Positive mentions are not exclusions: `films starring Brad Pitt`, `directed by Christopher Nolan`, `like Dr. Strangelove`, `Comedy movies`; Serbian Latin `Film sa Brad Pittom`, `filmovi Christophera Nolana`, `nešto kao Dr. Strangelove`, `komedije`; Serbian Cyrillic `Филм са Бредом Питом`, `филмови Кристофера Нолана`, `нешто као Dr. Strangelove`, `комедије`. Preserve actor/director/title intent in `semanticQuery`; a positive genre request remains a normal supported genre filter. `no horror` is a mandatory genre exclusion and is unsupported.
+
+When the user's message provides a recognizable Latin-script actor, director, or title spelling in its base form, preserve that spelling exactly in `semanticQuery`; do not add Serbian case endings to it. Keep Serbian grammar natural by choosing a construction around the unchanged name, including when the surrounding Serbian sentence is in Cyrillic. This concerns parser output only. A Serbian-inflected or possessive name supplied by the user remains a valid input; this rule does not change or reject such input, which continues through the existing interpretation behavior. Do not add external name lookups or a local/backend name-canonicalization step.
 
 Only for a matched supported movie request, return `type: query` and `alertCode: null` with the complete five-category checklist and any useful semantic text. For non-exclusion unsupported checklist categories, preserve the v4 `unsupported` category status and other valid checklist values; never discard or relax a hard filter.
 
