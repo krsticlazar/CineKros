@@ -34,6 +34,73 @@ public sealed class ParserV5AdapterTests
     }
 
     [TestMethod]
+    [DataRow("en", "movie", "alert", "QUERY_UNCLEAR", null)]
+    [DataRow("en", "I want a movie", "alert", "QUERY_UNCLEAR", null)]
+    [DataRow("sr", "film", "alert", "QUERY_UNCLEAR", null)]
+    [DataRow("sr", "Филм", "alert", "QUERY_UNCLEAR", null)]
+    [DataRow("en", "weather tomorrow", "alert", "NOT_MOVIE_REQUEST", null)]
+    [DataRow("sr", "kakvo je vreme sutra", "alert", "NOT_MOVIE_REQUEST", null)]
+    [DataRow("en", "Fight Club", "query", null, "Fight Club")]
+    [DataRow("sr", "Brad Pitt", "query", null, "Brad Pitt")]
+    public async Task LanguageAwareModeValidatesOfflineClassificationFixtures(
+        string language,
+        string message,
+        string expectedType,
+        string? expectedAlertCode,
+        string? expectedSemanticQuery)
+    {
+        // The mocked response is supplied by this fixture; this verifies request routing and contract validation,
+        // not whether a live model would classify the message the same way.
+        string? requestBody = null;
+        var output = expectedType == "query"
+            ? QueryWithSemantic(expectedSemanticQuery!)
+            : JsonSerializer.Serialize(new
+            {
+                type = "alert",
+                languageCheck = "match",
+                query = (object?)null,
+                alertCode = expectedAlertCode
+            });
+
+        using var client = new HttpClient(new FakeHandler(async (request, ct) =>
+        {
+            requestBody = await request.Content!.ReadAsStringAsync(ct);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(Envelope(output), Encoding.UTF8, "application/json")
+            };
+        }));
+
+        var parser = new GeminiRealQueryParser(client, "test-key", "v5 prompt", V5Schema(), new RealParsedQueryValidator(), languageAware: true);
+        var result = await parser.ParseAsync(language, message, CancellationToken.None);
+
+        Assert.AreEqual(expectedType, result.Type);
+        Assert.AreEqual("match", result.LanguageCheck);
+        Assert.AreEqual(expectedAlertCode, result.AlertCode);
+        if (expectedType == "query")
+        {
+            Assert.AreEqual(expectedSemanticQuery, result.Query!.SemanticQuery);
+            Assert.IsNull(result.Query.HardFilters.YearMin);
+            Assert.IsNull(result.Query.HardFilters.YearMax);
+            Assert.IsNull(result.Query.HardFilters.RuntimeMin);
+            Assert.IsNull(result.Query.HardFilters.RuntimeMax);
+            Assert.IsNull(result.Query.HardFilters.Genres);
+            Assert.IsNull(result.Query.HardFilters.RatingMin);
+            Assert.IsNull(result.Query.HardFilters.OriginalLanguage);
+        }
+        else
+        {
+            Assert.IsNull(result.Query);
+        }
+
+        using var body = JsonDocument.Parse(requestBody!);
+        var userText = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString()!;
+        using var userInput = JsonDocument.Parse(userText);
+        Assert.AreEqual(language, userInput.RootElement.GetProperty("language").GetString());
+        Assert.AreEqual(message, userInput.RootElement.GetProperty("message").GetString());
+    }
+
+    [TestMethod]
     public async Task DefaultModeKeepsV4ValidationPath()
     {
         using var client = new HttpClient(new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -48,6 +115,21 @@ public sealed class ParserV5AdapterTests
 
     private static string V5Schema() => FindFile("src/backend/CineKros.Api/RealProviders/query-parser-v5.schema.json");
     private static string V5Query() => """{"type":"query","languageCheck":"match","query":{"year":{"status":"absent","min":null,"max":null},"runtime":{"status":"absent","min":null,"max":null},"genres":{"status":"absent","all":[],"any":[]},"rating":{"status":"absent","value":null,"operator":null,"scale":null},"originalLanguage":{"status":"absent","value":null},"semanticQuery":"филмови"},"alertCode":null}""";
+    private static string QueryWithSemantic(string semantic) => JsonSerializer.Serialize(new
+    {
+        type = "query",
+        languageCheck = "match",
+        query = new
+        {
+            year = new { status = "absent", min = (int?)null, max = (int?)null },
+            runtime = new { status = "absent", min = (int?)null, max = (int?)null },
+            genres = new { status = "absent", all = Array.Empty<string>(), any = Array.Empty<string>() },
+            rating = new { status = "absent", value = (decimal?)null, @operator = (string?)null, scale = (string?)null },
+            originalLanguage = new { status = "absent", value = (string?)null },
+            semanticQuery = semantic
+        },
+        alertCode = (string?)null
+    });
     private static string Envelope(string text) => JsonSerializer.Serialize(new { candidates = new[] { new { content = new { parts = new[] { new { text } } } } } });
     private static string FindFile(string relativePath)
     {

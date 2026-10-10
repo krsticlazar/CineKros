@@ -28,7 +28,7 @@ public static class RealRecommendationEndpoint
             RealRecommendationResult result;
             try
             {
-                result = service.LanguageAwarePoc
+                result = service.LanguageAware
                     ? await service.RecommendAsync(new RealRecommendationRequest(attempt.Request, MapSelectedLanguage(attempt.Request.Language)), context.RequestAborted)
                     : await service.RecommendAsync(attempt.Request, context.RequestAborted);
             }

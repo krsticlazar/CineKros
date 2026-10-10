@@ -63,12 +63,15 @@ public static class RecommendationStartup
             throw new InvalidOperationException("The current Serbian POC must target the exact corrected Phase 6T v2 database.");
     }
 
-    private static void ValidatePocConnectionString(string connectionString)
+    private static string CreateReadOnlyConnectionString(string connectionString, string expectedDatabase)
     {
-        string? database;
-        try { database = new NpgsqlConnectionStringBuilder(connectionString).Database; }
-        catch { throw new InvalidOperationException("The Serbian POC database connection string is invalid."); }
-        ValidatePocDatabaseTarget(database);
+        NpgsqlConnectionStringBuilder builder;
+        try { builder = new NpgsqlConnectionStringBuilder(connectionString); }
+        catch { throw new InvalidOperationException("The recommendation database connection string is invalid."); }
+        if (builder.Database != expectedDatabase)
+            throw new InvalidOperationException("The configured recommendation database does not match its exact released dataset.");
+        builder.Options = "-c default_transaction_read_only=on";
+        return builder.ConnectionString;
     }
 
     private static void RegisterRealServices(IServiceCollection services, bool serbianPoc)
@@ -78,28 +81,29 @@ public static class RecommendationStartup
         var modelDirectory = Environment.GetEnvironmentVariable("CINEKROS_E5_MODEL_DIR");
         if (string.IsNullOrWhiteSpace(connectionString) || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(modelDirectory))
             throw new InvalidOperationException("Real recommendation mode requires DATABASE_CONNECTION_STRING, GEMINI_API_KEY, and CINEKROS_E5_MODEL_DIR in the process environment.");
-        if (serbianPoc) ValidatePocConnectionString(connectionString);
+        connectionString = CreateReadOnlyConnectionString(connectionString,
+            serbianPoc ? SearchDatasetExpectation.CorrectedV2Database : SearchDatasetExpectation.FullProductionDatabase);
 
         var artifactDirectory = Path.Combine(AppContext.BaseDirectory, "RealProviders");
-        var promptName = serbianPoc ? "query-parser-v5.md" : "query-parser-v4.md";
-        var schemaName = serbianPoc ? "query-parser-v5.schema.json" : "query-parser.schema.json";
+        const string promptName = "query-parser-v5.md";
+        const string schemaName = "query-parser-v5.schema.json";
         var systemInstruction = File.ReadAllText(Path.Combine(artifactDirectory, promptName));
         var responseSchema = File.ReadAllText(Path.Combine(artifactDirectory, schemaName));
         services.AddSingleton(new RealParsedQueryValidator());
         services.AddSingleton(_ => new HttpClient());
-        services.AddSingleton(sp => new GeminiRealQueryParser(sp.GetRequiredService<HttpClient>(), apiKey, systemInstruction, responseSchema, sp.GetRequiredService<RealParsedQueryValidator>(), sp.GetRequiredService<ILogger<GeminiRealQueryParser>>(), sp.GetRequiredService<IHostEnvironment>().IsDevelopment(), serbianPoc));
+        services.AddSingleton(sp => new GeminiRealQueryParser(sp.GetRequiredService<HttpClient>(), apiKey, systemInstruction, responseSchema, sp.GetRequiredService<RealParsedQueryValidator>(), sp.GetRequiredService<ILogger<GeminiRealQueryParser>>(), sp.GetRequiredService<IHostEnvironment>().IsDevelopment(), languageAware: true));
         services.AddSingleton<IRealQueryParser, GeminiQueryParserAdapter>();
-        var embeddingProfile = serbianPoc ? EmbeddingProfileDescriptor.MultilingualE5Base : EmbeddingProfileDescriptor.LegacyEnglish;
+        var embeddingProfile = EmbeddingProfileDescriptor.MultilingualE5Base;
         services.AddSingleton(sp => LoadE5Model(modelDirectory, embeddingProfile));
         services.AddSingleton<IRealQueryEmbeddingProvider, E5QueryEmbeddingAdapter>();
         services.AddSingleton<NpgsqlDataSource>(_ => MovieSearchRepository.CreateDataSource(connectionString));
         if (serbianPoc)
             services.AddSingleton(sp => MovieSearchRepository.CreateCorrectedPhase6TV2PocRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
         else
-            services.AddSingleton(sp => new MovieSearchRepository(sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<E5EmbeddingModel>().ProfileFingerprint));
+            services.AddSingleton(sp => MovieSearchRepository.CreateFullBilingualProductionRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
         services.AddSingleton<IRealMovieSearch, MovieSearchAdapter>();
         services.AddSingleton(sp => new RealRecommendationService(sp.GetRequiredService<IRealQueryParser>(), sp.GetRequiredService<RealParsedQueryValidator>(),
-            sp.GetRequiredService<IRealQueryEmbeddingProvider>(), sp.GetRequiredService<IRealMovieSearch>(), serbianPoc));
+            sp.GetRequiredService<IRealQueryEmbeddingProvider>(), sp.GetRequiredService<IRealMovieSearch>(), languageAwarePoc: true));
     }
 
     private static E5EmbeddingModel LoadE5Model(string modelDirectory, EmbeddingProfileDescriptor expectedProfile)

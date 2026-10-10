@@ -80,6 +80,43 @@ public sealed class ParserV5ValidatorTests
     }
 
     [TestMethod]
+    public void RejectsOnlyExactInternalControlCodesInV5SemanticQueries()
+    {
+        var controlCodes = new[]
+        {
+            "QUERY_UNCLEAR", "LANGUAGE_MISMATCH", "NOT_MOVIE_REQUEST", "UNSUPPORTED_REQUEST", "NO_RESULTS",
+            "INVALID_REQUEST", "RATE_LIMITED", "PARSER_INVALID_RESPONSE", "PROVIDER_UNAVAILABLE", "SEARCH_UNAVAILABLE", "INTERNAL_ERROR"
+        };
+
+        foreach (var language in new[] { SearchLanguage.English, SearchLanguage.Serbian })
+        foreach (var code in controlCodes)
+        {
+            AssertInvalid(Query("match", code), language);
+            AssertInvalidTyped(new RealParserResult("query", new RealParsedQuery(new RealHardFilters(), code), LanguageCheck: "match"), language);
+        }
+
+        foreach (var (language, semantic) in new[]
+        {
+            (SearchLanguage.English, "I am unclear what kind of movie I want"),
+              (SearchLanguage.English, "A film about QUERY_UNCLEAR errors"),
+              (SearchLanguage.English, "Need a film: QUERY_UNCLEAR."),
+            (SearchLanguage.English, "A QUERY_UNCLEARLY surreal film"),
+            (SearchLanguage.English, "The Internal Error"),
+            (SearchLanguage.English, "query_unclear"),
+            (SearchLanguage.Serbian, "nejasna, tiha misterija")
+        })
+        {
+            var result = validator.ValidateV5(Query("match", semantic), language);
+            Assert.AreEqual(semantic, result.Query!.SemanticQuery);
+            validator.ValidateResultV5(result, language);
+        }
+
+        var validAlert = validator.ValidateV5(Alert("match", "QUERY_UNCLEAR"), SearchLanguage.English);
+        Assert.AreEqual("alert", validAlert.Type);
+        Assert.AreEqual("QUERY_UNCLEAR", validAlert.AlertCode);
+    }
+
+    [TestMethod]
     public void PreservesHardFiltersRatingAndPositivePersonSemantics()
     {
         var json = """{"type":"query","languageCheck":"match","query":{"year":{"status":"present","min":2016,"max":null},"runtime":{"status":"present","min":null,"max":109},"genres":{"status":"present","all":["Sci-Fi"],"any":[]},"rating":{"status":"present","value":8,"operator":"gte","scale":"ten"},"originalLanguage":{"status":"present","value":"ja"},"semanticQuery":"filmovi sa Brad Pittom"},"alertCode":null}""";

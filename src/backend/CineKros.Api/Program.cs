@@ -1,6 +1,7 @@
 using CineKros.Api;
 using CineKros.Api.RealFlow;
 using CineKros.Api.Startup;
+using CineKros.Api.Search;
 using CineKros.Embedding;
 using System.Threading.RateLimiting;
 
@@ -20,7 +21,10 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 if (recommendationMode == "real")
+{
     _ = app.Services.GetRequiredService<E5EmbeddingModel>();
+    await app.Services.GetRequiredService<MovieSearchRepository>().EnsureRuntimeReadyAsync();
+}
 app.UseCors(ProductionHttpConfiguration.RecommendationCorsPolicy);
 app.UseRateLimiter();
 if (recommendationMode == "real")

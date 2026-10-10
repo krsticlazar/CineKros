@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 
 for %%I in ("%~dp0..") do set "REPO_DIR=%%~fI"
 set "STARTUP_DIR=%~dp0"
@@ -9,8 +9,14 @@ set "COMPOSE_FILE=%REPO_DIR%\database\docker\compose.yaml"
 set "PATH=%ProgramFiles%\dotnet;%ProgramFiles%\nodejs;%PATH%"
 
 if /i not "%~1"=="--bootstrap-ready" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%\src\load-startup-env.ps1" -LauncherPath "%~f0"
-  exit /b %errorlevel%
+  set "STARTUP_HEADLESS=false"
+  if /i "%~1"=="--headless" set "STARTUP_HEADLESS=true"
+  if /i "%~1"=="--headless" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%\src\load-startup-env.ps1" -LauncherPath "%~f0" -Headless
+  ) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%\src\load-startup-env.ps1" -LauncherPath "%~f0"
+  )
+  exit /b !errorlevel!
 )
 
 rem Docker Desktop is started only through its explicit executable path.
@@ -59,6 +65,7 @@ exit /b 1
 
 :database_ready
 if not defined CINEKROS_RECOMMENDATION_MODE set "CINEKROS_RECOMMENDATION_MODE=real"
+set "CINEKROS_SERBIAN_POC=false"
 if /i "%CINEKROS_RECOMMENDATION_MODE%"=="fake" (
   echo Rezim preporuka: Development fake ^(bez Gemini parsera i realne pretrage^).
 ) else if /i "%CINEKROS_RECOMMENDATION_MODE%"=="real" (
@@ -72,17 +79,22 @@ if /i "%CINEKROS_RECOMMENDATION_MODE%"=="fake" (
     pause
     exit /b 1
   )
-  if not defined CINEKROS_E5_MODEL_DIR set "CINEKROS_E5_MODEL_DIR=%REPO_DIR%\database\data\models\e5-base-v2\f52bf8ec8c7124536f0efb74aca902b2995e5bcd"
+  if not defined CINEKROS_E5_MODEL_DIR set "CINEKROS_E5_MODEL_DIR=%REPO_DIR%\database\data\models\multilingual-e5-base\d128750597153bb5987e10b1c3493a34e5a4502a"
   if not exist "%CINEKROS_E5_MODEL_DIR%\model_qint8_avx512_vnni.onnx" (
     echo GRESKA: Nije pronadjen lokalni E5 model na CINEKROS_E5_MODEL_DIR.
     pause
     exit /b 1
   )
-  echo Rezim preporuka: real.
+  echo Rezim preporuka: real, kompletan visejezicki katalog cinekros ^(9730 filmova^).
 ) else (
   echo GRESKA: CINEKROS_RECOMMENDATION_MODE mora biti fake ili real.
   pause
   exit /b 1
+)
+
+if /i "%CINEKROS_STARTUP_HEADLESS%"=="true" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%STARTUP_DIR%start-headless-runtime.ps1"
+  exit /b !errorlevel!
 )
 
 start "CineKros Backend" cmd /k "cd /d ""%SERVER_DIR%"" && set ""ASPNETCORE_ENVIRONMENT=Development"" && dotnet run --launch-profile CineKros.Api"

@@ -17,6 +17,22 @@ public sealed class ParserV5PromptContractTests
     }
 
     [TestMethod]
+    public void PromptSeparatesUnclearMovieIntentFromClearlyNonMovieRequests()
+    {
+        var prompt = ReadPrompt();
+
+        StringAssert.Contains(prompt, "distinguish unclear movie intent from a clearly non-movie request");
+        StringAssert.Contains(prompt, "do not classify it as `NOT_MOVIE_REQUEST` merely because it is short or underspecified");
+        StringAssert.Contains(prompt, "EN `movie`, SR Latin `film`, and SR Cyrillic `филм`");
+        StringAssert.Contains(prompt, "each gets `QUERY_UNCLEAR`");
+        StringAssert.Contains(prompt, "A neutral title or person-only input such as `Fight Club` or `Brad Pitt` remains a matched movie-domain query");
+        StringAssert.Contains(prompt, "Use `NOT_MOVIE_REQUEST` only when the matched message clearly asks for something outside movie search");
+        StringAssert.Contains(prompt, "EN `weather tomorrow` or SR Latin `kakvo je vreme sutra`");
+
+        // This is an offline prompt-contract regression; it does not establish live model classification quality.
+    }
+
+    [TestMethod]
     public void PromptKeepsNeutralProperNamesNoLookupAndV4ParserSemantics()
     {
         var prompt = ReadPrompt();

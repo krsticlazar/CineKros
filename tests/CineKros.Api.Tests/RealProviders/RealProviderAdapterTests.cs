@@ -98,7 +98,10 @@ public sealed class RealProviderAdapterTests
         var project = File.ReadAllText(FindRepositoryFile("src/backend/CineKros.Api/CineKros.Api.csproj"));
         var startup = File.ReadAllText(FindRepositoryFile("src/backend/CineKros.Api/Startup/RecommendationStartup.cs"));
         StringAssert.Contains(project, "RealProviders/query-parser-v4.md");
-        StringAssert.Contains(startup, "query-parser-v4.md");
+        StringAssert.Contains(startup, "query-parser-v5.md");
+        StringAssert.Contains(startup, "query-parser-v5.schema.json");
+        Assert.IsFalse(startup.Contains("query-parser-v4.md", StringComparison.Ordinal),
+            "The retained V4 prompt is historical; active real startup uses the accepted V5 parser contract.");
         Assert.IsTrue(File.Exists(Path.Combine(AppContext.BaseDirectory, "RealProviders", "query-parser-v4.md")));
         StringAssert.Contains(prompt, "clause by clause");
         StringAssert.Contains(prompt, "under 110");

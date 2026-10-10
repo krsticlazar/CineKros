@@ -351,6 +351,34 @@ public sealed class RealRecommendationServiceTests
     }
 
     [TestMethod]
+    public async Task InternalControlCodesInInjectedSemanticQueriesFailBeforePreflightEmbeddingOrSearch()
+    {
+        var controlCodes = new[]
+        {
+            "QUERY_UNCLEAR", "LANGUAGE_MISMATCH", "NOT_MOVIE_REQUEST", "UNSUPPORTED_REQUEST", "NO_RESULTS",
+            "INVALID_REQUEST", "RATE_LIMITED", "PARSER_INVALID_RESPONSE", "PROVIDER_UNAVAILABLE", "SEARCH_UNAVAILABLE", "INTERNAL_ERROR"
+        };
+
+        foreach (var code in controlCodes)
+        {
+            var embedding = new FakeEmbedding();
+            var search = new FakeSearch();
+            var parser = new FakeParser(new RealParserResult(
+                "query", new RealParsedQuery(new RealHardFilters(), code), LanguageCheck: "match"));
+            var service = new RealRecommendationService(parser, new RealParsedQueryValidator(), embedding, search, languageAwarePoc: true);
+
+            var error = await Assert.ThrowsExactlyAsync<RealProviderException>(() => service.RecommendAsync(
+                new RealRecommendationRequest(new ParserInput("en", "recommend a movie"), SearchLanguage.English), CancellationToken.None));
+
+            Assert.AreEqual("PARSER_INVALID_RESPONSE", error.Code);
+            Assert.AreEqual(1, parser.Calls);
+            Assert.AreEqual(0, embedding.Calls, $"Marker {code} reached query embedding.");
+            Assert.AreEqual(0, search.PreflightCalls, $"Marker {code} reached selected-language readiness.");
+            Assert.AreEqual(0, search.TotalCalls, $"Marker {code} reached semantic or hard-only search.");
+        }
+    }
+
+    [TestMethod]
     public async Task ProviderAndDatabaseFailuresAreSanitizedAndCancellationPropagates()
     {
         var parserFailure = await Assert.ThrowsExactlyAsync<RealProviderException>(() => Service(new FakeParser(null, new Exception("secret parser body")), new FakeEmbedding(), new FakeSearch())

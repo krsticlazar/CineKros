@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
+using CineKros.Api;
 using CineKros.Api.Database;
 using CineKros.Api.Search;
 
@@ -18,6 +19,20 @@ public sealed class RealParsedQueryValidator
         "ar", "bm", "bn", "bo", "bs", "cs", "da", "de", "el", "en", "es", "fa", "fi", "fr", "he", "hi", "hu", "id", "is", "it", "iu", "ja", "ka", "ko", "ku", "mk", "mn", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sr", "sv", "ta", "th", "tl", "tn", "tr", "vi", "zh"
     };
     private static readonly HashSet<string> AlertCodes = new(StringComparer.Ordinal) { "QUERY_UNCLEAR", "NOT_MOVIE_REQUEST", "UNSUPPORTED_REQUEST" };
+    private static readonly HashSet<string> InternalControlCodeTokens = new(StringComparer.Ordinal)
+    {
+        ApiErrorCodes.InvalidRequest,
+        ApiErrorCodes.QueryUnclear,
+        ApiErrorCodes.LanguageMismatch,
+        ApiErrorCodes.NotMovieRequest,
+        ApiErrorCodes.UnsupportedRequest,
+        ApiErrorCodes.NoResults,
+        ApiErrorCodes.RateLimited,
+        ApiErrorCodes.ParserInvalidResponse,
+        ApiErrorCodes.ProviderUnavailable,
+        ApiErrorCodes.SearchUnavailable,
+        ApiErrorCodes.InternalError
+    };
 
     public RealParserResult Validate(string json) => Validate(json, out _);
 
@@ -103,7 +118,7 @@ public sealed class RealParsedQueryValidator
         {
             if (!HasActiveFilter(filters)) Invalid();
         }
-        else if (!string.Equals(semantic, semantic.Trim(), StringComparison.Ordinal) || semantic.Length == 0 || semantic.Any(char.IsControl) || !semantic.EnumerateRunes().Any(Rune.IsLetterOrDigit)) Invalid();
+        else if (!string.Equals(semantic, semantic.Trim(), StringComparison.Ordinal) || semantic.Length == 0 || semantic.Any(char.IsControl) || !semantic.EnumerateRunes().Any(Rune.IsLetterOrDigit) || InternalControlCodeTokens.Contains(semantic)) Invalid();
     }
 
     /// <summary>Validates the strict v5 envelope and its language branch, then applies the unchanged v4 checklist rules.</summary>
@@ -300,7 +315,7 @@ public sealed class RealParsedQueryValidator
         if (value.ValueKind == JsonValueKind.Null) return null;
         if (value.ValueKind != JsonValueKind.String) Invalid();
         var semantic = value.GetString()?.Trim();
-        if (string.IsNullOrEmpty(semantic) || semantic.Any(char.IsControl) || !semantic.EnumerateRunes().Any(Rune.IsLetterOrDigit)) Invalid();
+        if (string.IsNullOrEmpty(semantic) || semantic.Any(char.IsControl) || !semantic.EnumerateRunes().Any(Rune.IsLetterOrDigit) || InternalControlCodeTokens.Contains(semantic)) Invalid();
         return semantic;
     }
 

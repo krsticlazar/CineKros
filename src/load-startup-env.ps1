@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string] $LauncherPath
+    [string] $LauncherPath,
+    [switch] $Headless
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,14 +34,25 @@ function Get-LocalValue([string] $Name) {
     return $value
 }
 
+foreach ($port in @(5179, 5173)) {
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+    if ($listeners.Count -gt 0) { Stop-Safely "Port $port je zauzet; pokretanje je zaustavljeno bez diranja postojećeg procesa." }
+}
+
 $env:CINEKROS_POSTGRES_PASSWORD = Get-LocalValue 'CINEKROS_POSTGRES_PASSWORD'
 if ([string]::IsNullOrWhiteSpace($env:CINEKROS_RECOMMENDATION_MODE)) { $env:CINEKROS_RECOMMENDATION_MODE = 'real' }
 if ($env:CINEKROS_RECOMMENDATION_MODE -notin @('real', 'fake')) { Stop-Safely 'CINEKROS_RECOMMENDATION_MODE mora biti real ili fake.' }
+$env:CINEKROS_SERBIAN_POC = 'false'
+$env:ASPNETCORE_ENVIRONMENT = 'Development'
+$env:DOTNET_ENVIRONMENT = 'Development'
+$env:VITE_API_BASE_URL = 'http://127.0.0.1:5179'
+$env:CINEKROS_ALLOWED_ORIGINS = 'http://localhost:5173,http://127.0.0.1:5173'
+$env:CINEKROS_STARTUP_HEADLESS = if ($Headless) { 'true' } else { 'false' }
 if ($env:CINEKROS_RECOMMENDATION_MODE -eq 'real') {
     $env:GEMINI_API_KEY = Get-LocalValue 'GEMINI_API_KEY'
     $escapedPassword = $env:CINEKROS_POSTGRES_PASSWORD.Replace('"', '""')
-    $env:DATABASE_CONNECTION_STRING = 'Host=127.0.0.1;Port=5433;Database=cinekros;Username=cinekros;Password="' + $escapedPassword + '"'
-    $env:CINEKROS_E5_MODEL_DIR = Join-Path $repoRoot 'database\data\models\e5-base-v2\f52bf8ec8c7124536f0efb74aca902b2995e5bcd'
+    $env:DATABASE_CONNECTION_STRING = 'Host=127.0.0.1;Port=5433;Database=cinekros;Username=cinekros;Password="' + $escapedPassword + '";Options=-c default_transaction_read_only=on'
+    $env:CINEKROS_E5_MODEL_DIR = Join-Path $repoRoot 'database\data\models\multilingual-e5-base\d128750597153bb5987e10b1c3493a34e5a4502a'
 }
 
 $commandLine = '"{0}" --bootstrap-ready' -f $LauncherPath

@@ -310,7 +310,7 @@ public sealed class RealApiDatabaseContractTests
     }
 
     [TestMethod]
-    public async Task ActualProgramRunsRealModeWithFakeProvidersAndDisposableDatabaseReadiness()
+    public void ActualProgramRejectsLegacyDisposableDatabaseForFullProductionMode()
     {
         var previousMode = Environment.GetEnvironmentVariable("CINEKROS_RECOMMENDATION_MODE");
         var previousConnection = Environment.GetEnvironmentVariable("DATABASE_CONNECTION_STRING");
@@ -320,30 +320,16 @@ public sealed class RealApiDatabaseContractTests
         Environment.SetEnvironmentVariable("DATABASE_CONNECTION_STRING", _connectionString);
         Environment.SetEnvironmentVariable("GEMINI_API_KEY", "c10-test-only-no-network");
         Environment.SetEnvironmentVariable("CINEKROS_E5_MODEL_DIR", Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../")), "database/data/models/e5-base-v2/f52bf8ec8c7124536f0efb74aca902b2995e5bcd"));
+        ApiParser.Reset();
         try
         {
             using var factory = new WebApplicationFactory<global::Program>().WithWebHostBuilder(builder =>
             {
                 builder.UseEnvironment("Development");
-                builder.ConfigureTestServices(services =>
-                {
-                    services.RemoveAll<IRealQueryParser>();
-                    services.RemoveAll<IRealQueryEmbeddingProvider>();
-                    services.AddSingleton<IRealQueryParser, ApiParser>();
-                    services.AddSingleton<IRealQueryEmbeddingProvider, ApiEmbedding>();
-                });
             });
-            using var client = factory.CreateClient();
-            ApiParser.Reset();
-            var hardOnly = await Post(client, "sr", "hard-only");
-            Assert.AreEqual(HttpStatusCode.OK, hardOnly.StatusCode, "The real Program route must be active and use the disposable catalog DB.");
-            AssertNoHardOnlyEmbeddingCall(0, ApiParser.EmbeddingCalls);
-
-            var hybrid = await Post(client, "en", "hybrid");
-            Assert.AreEqual(HttpStatusCode.OK, hybrid.StatusCode);
-            using var json = JsonDocument.Parse(await hybrid.Content.ReadAsStringAsync());
-            Assert.AreEqual(10, json.RootElement.GetProperty("meta").GetProperty("count").GetInt32());
-            Assert.AreEqual(1, ApiParser.EmbeddingCalls, "The Program real-mode route must invoke only the injected fake embedding provider.");
+            var error = Assert.ThrowsExactly<InvalidOperationException>(() => factory.CreateClient());
+            Assert.AreEqual("The configured recommendation database does not match its exact released dataset.", error.Message);
+            Assert.AreEqual(0, ApiParser.EmbeddingCalls, "A mismatched legacy database must be rejected before any query embedding.");
         }
         finally
         {

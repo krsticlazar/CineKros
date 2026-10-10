@@ -59,11 +59,12 @@ public sealed class RealRecommendationService(
     IRealMovieSearch search,
     bool languageAwarePoc = false)
 {
-    public bool LanguageAwarePoc { get; } = languageAwarePoc;
+    public bool LanguageAware { get; } = languageAwarePoc;
+    public bool LanguageAwarePoc => LanguageAware;
 
     public Task<RealRecommendationResult> RecommendAsync(ParserInput input, CancellationToken cancellationToken)
     {
-        if (!LanguageAwarePoc) return RecommendCoreAsync(input, null, cancellationToken);
+        if (!LanguageAware) return RecommendCoreAsync(input, null, cancellationToken);
         ArgumentNullException.ThrowIfNull(input);
         var language = input.Language switch
         {
@@ -77,7 +78,7 @@ public sealed class RealRecommendationService(
     public Task<RealRecommendationResult> RecommendAsync(RealRecommendationRequest input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (!LanguageAwarePoc) return Task.FromException<RealRecommendationResult>(new RealProviderException("SEARCH_UNAVAILABLE"));
+        if (!LanguageAware) return Task.FromException<RealRecommendationResult>(new RealProviderException("SEARCH_UNAVAILABLE"));
         if (!IsConsistentLanguageRequest(input))
             return Task.FromException<RealRecommendationResult>(new RealProviderException("INVALID_REQUEST"));
         return RecommendCoreAsync(input.OriginalRequest, input.SelectedLanguage, cancellationToken);

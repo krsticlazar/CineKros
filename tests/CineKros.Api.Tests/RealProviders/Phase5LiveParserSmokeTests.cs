@@ -33,8 +33,8 @@ public sealed class Phase5LiveParserSmokeTests
         _ = ReadAndValidatePlan();
         var prompt = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "RealProviders", "query-parser-v5.md"));
         var schema = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "RealProviders", "query-parser-v5.schema.json"));
-        // Current approved asset; historical live/resume paths keep their original run pin.
-        Assert.AreEqual("E3861C1118FC1CDC32DA76543F2FEFB120B2ED4B318468D08BD9EA6C06445475", Sha256(prompt));
+        // Phase 10 approved unclear-domain clarification; historical live/resume paths keep their original run pin.
+        Assert.AreEqual("6BB15604302A8F70CA0D513A10BBF8D6694C7A5B92E88ECC78D3965386C0AA18", Sha256(prompt));
         Assert.AreEqual(ExpectedSchemaSha256, Sha256(schema));
     }
 
