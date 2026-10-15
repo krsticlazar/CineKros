@@ -1,18 +1,9 @@
 # CineKros.Importer.Tests
 
-## Čemu služi
+Tests catalog validation and transactional import behavior, including rejection of incomplete or mismatched artifacts and safe identical re-import. Run:
 
-Testira `CineKros.Catalog.Importer`: proveru odobrenog JSONL kataloga i siguran uvoz u PostgreSQL. Tu su unit/contract provere validacije i integracioni testovi transakcija nad testnom bazom.
+```powershell
+dotnet test --project tests/CineKros.Importer.Tests/CineKros.Importer.Tests.csproj
+```
 
-## Gde se uklapa u CineKros
-
-`CineKros.Catalog.Importer → CineKros.Importer.Tests`. Test projekat direktno referencira katalog importer; ne računa vektore niti testira Gemini parser.
-
-## Najvažniji delovi
-
-- `CatalogValidatorTests.cs` — proverava manifest/hash, oblik i identitet pregledanog kataloga.
-- `CatalogImporterIntegrationTests.cs` — proverava svih 9.730 redova, identično ponavljanje bez izmena, odbijanje promenjenog stanja i rollback pri DB grešci.
-
-## Šta bih rekao profesorki
-
-> „Ovi testovi dokazuju da katalog ulazi u bazu samo kao celina i da ponovno pokretanje ne duplira ili menja filmske podatke.“
+The suite uses isolated disposable PostgreSQL integration infrastructure; it must not target the persistent application or production database. `CINEKROS_POC_ROOT` opts into local Serbian POC/full-catalog artifact validation and does not import those artifacts.

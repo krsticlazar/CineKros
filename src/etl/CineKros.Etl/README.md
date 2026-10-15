@@ -1,33 +1,23 @@
 # CineKros.Etl
 
-## Uloga
+Offline tools prepare versioned catalog inputs for import and embedding. They read local MovieLens/TagDL files and approved enrichment/cache artifacts; `enrich-v2` is the only active command that makes TMDB requests and requires `TMDB_READ_ACCESS_TOKEN`. Other commands are file-only. Outputs are JSONL and manifests in caller-selected directories.
 
-Offline komandni alat priprema proverljive kataloge; nije deo obrade korisničkog zahteva. Polazi od lokalnih MovieLens/TagDL podataka, gradi semantički tekst, spaja odobrene TMDB detalje i objavljuje kataloge sa manifestima. TMDB se koristi samo u zasebnom `enrich-v2` toku.
-
-## Tok podataka
-
-`metadata i TagDL → metadata/semantic export → enrich-v2 → catalog-merge → finalni katalog`
-
-Finalni katalog dalje koriste [Catalog.Importer](../CineKros.Catalog.Importer/README.md) za strukturisane podatke i [E5.Generator](../CineKros.E5.Generator/README.md) za offline film-vektore. Ovaj projekat ih ne poziva direktno.
-
-## Kako čitati kod
-
-- [Program.cs](Program.cs) razvrstava CLI komande i odbija zastareli `real-embed` režim. `fake-embed` služi samo za determinističke testne vektore.
-- [MetadataExporter.cs](MetadataExporter.cs) proverava očekivane ulaze i broj redova, spaja odobreni podskup i piše JSONL sa manifestom.
-- [SemanticExporter.cs](SemanticExporter.cs) dodaje odabrane TagDL signale u `semanticText`; [EnrichmentV2Runner.cs](EnrichmentV2Runner.cs) obogaćuje postojeće zapise i cache izvorima predviđenim za offline obradu.
-- [CombinedCatalogExporter.cs](CombinedCatalogExporter.cs) proverava kompatibilnost i sastavlja finalni katalog.
-- [RealDocumentEmbeddingRunner.cs](RealDocumentEmbeddingRunner.cs) i dalje čuva istorijski Gemini tok radi reproduktivnosti; CLI ga ne pokreće. Aktuelne dokument-vektore pravi E5 generator.
-
-ETL unapred pravi verzionisane ulaze za bazu i pretragu. Backend pri korisničkom upitu ne zove TMDB, niti računa filmske vektore.
-
-## Serbian search POC catalog tools
-
-These additive commands are bounded to the frozen 150-movie / 418-tag Serbian POC. They validate the immutable B05a source identity, require absolute paths, and publish only into a new, absent output directory.
+The pipeline exports metadata, adds selected TagDL signals to `semanticText`, optionally enriches records, then merges compatible inputs into a final catalog. `CineKros.Catalog.Importer` and `CineKros.E5.Generator` consume that catalog. From the repository root, the main file workflows are:
 
 ```powershell
-dotnet run --project src/etl/CineKros.Etl/CineKros.Etl.csproj -- sr-poc-select --catalog <absolute-B05a-movies-catalog.jsonl> --output-dir <new-absolute-selection-dir>
-dotnet run --project src/etl/CineKros.Etl/CineKros.Etl.csproj -- sr-poc-build --catalog <absolute-immutable-B05a-movies-catalog.jsonl> --dictionary <absolute-locked-418-tag-dictionary.json> --output-dir <new-absolute-catalog-dir>
-dotnet run --project src/etl/CineKros.Etl/CineKros.Etl.csproj -- sr-poc-context --selected-source <absolute-selected-source.jsonl> --qa-report <absolute-qa-report.json> --output <new-absolute-context-packet.json>
+dotnet run --project src/etl/CineKros.Etl -- --source-root <absolute-source-dir> --output-dir <absolute-output-dir>
+dotnet run --project src/etl/CineKros.Etl -- semantic-export --input-jsonl <absolute-jsonl> --input-manifest <absolute-manifest> --tagdl-csv <absolute-csv> --output-dir <absolute-output-dir>
+dotnet run --project src/etl/CineKros.Etl -- catalog-merge --semantic-dir <absolute-dir> --enrichment-dir <absolute-dir> --output-dir <absolute-output-dir>
 ```
 
-`sr-poc-select` reads the canonical source and writes the deterministic selected source, tags, and selection manifest. `sr-poc-context` emits context for QA-flagged translation entries only. `sr-poc-build` validates the exact accepted POC dictionary and writes the bilingual 19-field catalog plus hash manifest. These are file-only preparation tools: they do not import into production or any database, generate vectors, call APIs/providers, or run Gemini. Outputs are research/engineering POC artifacts, not a production dictionary or production catalog.
+`enrich-v2` additionally requires `--input-jsonl`, `--input-manifest`, `--ml32m-root`, `--cache-dir`, and `--output-dir`, plus `TMDB_READ_ACCESS_TOKEN`; it can make live TMDB requests. The old `real-embed` command is disabled; `fake-embed` creates deterministic test vectors only. Historical embedding code remains for reproducibility and is not the current generator.
+
+The `sr-poc-select`, `sr-poc-build`, and `sr-poc-context` commands are bounded to the frozen 150-movie/418-tag POC. They require absolute input paths and new output locations. They do not call providers or databases. Their outputs are research artifacts, not a production catalog or dictionary:
+
+```text
+sr-poc-select --catalog <absolute-source-catalog.jsonl> --output-dir <new-absolute-dir>
+sr-poc-build --catalog <absolute-source-catalog.jsonl> --dictionary <absolute-dictionary.json> --output-dir <new-absolute-dir>
+sr-poc-context --selected-source <absolute-selected.jsonl> --qa-report <absolute-qa.json> --output <new-absolute-context.json>
+```
+
+Run tests with `dotnet test --project tests/CineKros.Etl.Tests/CineKros.Etl.Tests.csproj` from the repository root. Full-source fake verification is separately opt-in through `CINEKROS_CANONICAL_ROOT`; it does not make live TMDB calls.

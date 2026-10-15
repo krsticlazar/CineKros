@@ -4,34 +4,55 @@ AI-powered movie recommendation system combining natural-language query parsing,
 
 ![CineKros logo](src/frontend/src/assets/CineKros_logo.svg)
 
-CineKros is a bachelor's thesis project by Lazar Krstić: a local hybrid movie search application. The React, TypeScript and Vite frontend sends a query to an ASP.NET Core API. Gemini `gemini-3.1-flash-lite` is used solely to parse queries into structured search intent; it does not select movies. PostgreSQL applies mandatory SQL hard filters, then exact pgvector cosine similarity ranks only eligible results.
+CineKros is a bachelor's thesis project by Lazar Krstić: a bilingual movie search application. Users write English or Serbian requests, including Serbian Cyrillic. The React/TypeScript/Vite frontend sends the selected language and message to an ASP.NET Core API on .NET 10. Gemini `gemini-3.1-flash-lite` parses the request through the V5 checklist contract; the backend validates and normalizes its output.
 
-The catalog contains 9,730 movies. Its semantic source combines MovieLens Tag Genome 2021 with approved MovieLens 32M enrichment and offline TMDB metadata. Document and runtime query embeddings use the local E5-base-v2 INT8 ONNX model with 768 dimensions. Film data, model files and generated vectors are local-only; they are not included in this repository.
+The catalog contains 9,730 movies, with MovieLens Tag Genome 2021 semantic tags, MovieLens 32M rating/genre metadata and offline TMDB enrichment. Both languages use the pinned local `intfloat/multilingual-e5-base` INT8 ONNX encoder, with 768 dimensions and batch size one. English and Serbian document representations have separate vector columns (`embedding` and `embedding_sr`), totaling 19,460 document vectors.
 
-With separately obtained source data and an offline TMDB cache, the tools in `src/etl/` prepare and validate catalog/vector artifacts for database import; `scripts/bootstrap-e5-model.ps1` obtains or verifies the pinned local model. The repository does not include the source datasets or generated artifacts.
+PostgreSQL applies mandatory year, runtime, genre, rating and original-language filters. Semantic requests use a local E5 query vector and exact pgvector cosine ranking among eligible movies, with deterministic ID tie-breaking and at most ten results. Hard-filter-only requests skip query embedding and use deterministic metadata ordering. Positive actor/director mentions are semantic preferences; exclusions are unsupported. Gemini interprets requests; it does not select movies or generate embeddings.
+
+Raw data, translation dictionaries, generated catalogs/vectors, model binaries and database storage are local artifacts. The ETL, translator, generator, migrations and import tools below support their preparation and validation; this checkout alone does not contain a populated database.
 
 ## Repository
 
 | Path | Purpose |
 | --- | --- |
-| `src/frontend/` | React/TypeScript/Vite application |
-| `src/backend/CineKros.Api/` | ASP.NET Core API and search runtime |
-| `src/embedding/` | Local E5 embedding runtime |
-| `src/etl/` | Catalog, database and vector tooling |
+| [Frontend](src/frontend/README.md) | React/TypeScript/Vite application |
+| [API](src/backend/CineKros.Api/README.md) | Request validation, Gemini V5 parsing, SQL/pgvector search and response mapping |
+| [Embedding](src/embedding/CineKros.Embedding/README.md) | Shared local multilingual E5 runtime |
+| [Text normalization](src/shared/CineKros.TextNormalization/README.md) | Deterministic Serbian Cyrillic-to-Latin normalization |
+| [ETL](src/etl/CineKros.Etl/README.md), [translator](src/etl/CineKros.Translator/README.md), [generator](src/etl/CineKros.E5.Generator/README.md) | Offline catalog, tag dictionary and document vectors |
+| [Migrator](src/etl/CineKros.Database.Migrator/README.md), [catalog importer](src/etl/CineKros.Catalog.Importer/README.md), [vector importer](src/etl/CineKros.VectorImporter/README.md) | Explicit database preparation and guarded imports |
+| [Evaluation](src/evaluation/CineKros.Evaluation/README.md) | Offline evaluation CLI, separate from web requests |
 | `database/docker/` and `database/migrations/` | PostgreSQL/pgvector Compose service and SQL migrations |
-| `tests/` | .NET tests and API fixture validation |
-| `scripts/` | Explicit local model bootstrap |
+| [Tests](tests/README.md) | MSTest projects, gated integration checks and API fixtures |
+| [Scripts](scripts/README.md) | Explicit local model bootstrap |
+
+[Solution study guide](slnx_README.md) lists project dependencies and a suggested reading order. Local consultation notes and manual testing material live under `docs/`, including `docs/testing/`; local notes and thesis materials are excluded from the public repository.
 
 ## Local development
 
-Prerequisites are .NET 10, Node.js 24, Docker with Compose, and PowerShell. Restore and check the .NET solution with:
+Use the SDK pinned in [global.json](global.json), Node.js 24, Docker with Compose, and PowerShell. From the repository root:
 
 ```powershell
 dotnet restore CineKros.slnx --locked-mode
 dotnet build CineKros.slnx --no-restore
-dotnet test CineKros.slnx --no-restore
+npm ci --prefix src/frontend
 ```
 
-Install frontend dependencies with `npm ci --prefix src/frontend`, then use `npm run dev`, `npm run lint`, `npm test`, or `npm run build` from `src/frontend`. Validate API examples with `npm ci --prefix tests/fixtures` and `npm run check:fixtures --prefix tests/fixtures` from the repository root.
+The Windows launcher is `src/start_script.cmd`: it loads process configuration or the ignored root `.env`, checks Docker, starts the project PostgreSQL/pgvector service, then starts the backend at `http://127.0.0.1:5179` and frontend at `http://localhost:5173`. Its real mode selects the full `cinekros` bilingual database. It requires an already prepared compatible catalog/vector release and the pinned multilingual model; startup does not migrate, import or generate data.
 
-To explicitly download or verify the pinned local E5 artifacts, run `pwsh -File scripts/bootstrap-e5-model.ps1` (or add `-VerifyOnly`). The normal Windows launcher is `src/start_script.cmd`; it reads required values from the process environment or ignored root `.env`, starts the PostgreSQL Compose service, then starts the API and frontend. It does not run migrations or import data. Generated data and model artifacts remain local.
+Configure `CINEKROS_POSTGRES_PASSWORD` and `GEMINI_API_KEY` locally; [.env.example](.env.example) documents empty placeholders. The launcher derives the local database connection and model directory. Direct backend startup needs `CINEKROS_RECOMMENDATION_MODE=real`, `DATABASE_CONNECTION_STRING`, `GEMINI_API_KEY` and `CINEKROS_E5_MODEL_DIR` in its process environment. Direct Development startup without a mode uses fake providers. See the API README for configuration and CORS details. Never commit secrets.
+
+`src/start_poc.cmd` is a separate launcher for the corrected 150-film database `cinekros_sr_poc_phase06t_v2_20261009`. Use the normal launcher for the complete application; the POC keeps its own catalog/vector readiness guards.
+
+Explicitly verify or download the current model with:
+
+```powershell
+pwsh -File scripts/bootstrap-e5-model.ps1 -Profile multilingual-e5-base-int8-onnx-v1 -VerifyOnly
+```
+
+Remove `-VerifyOnly` only when deliberately downloading the pinned artifacts. The script's unqualified default still selects the historical English model, so use the explicit multilingual profile.
+
+## Checks
+
+Run frontend `npm test`, `npm run lint` and `npm run build` in `src/frontend`. API examples use `npm ci --prefix tests/fixtures` followed by `npm run check:fixtures --prefix tests/fixtures`. See the tests README before broader .NET runs: some checks require local artifacts or disposable databases, and live parser tests are explicitly gated. `Directory.Build.props` directs .NET test output to ignored `.local/TestResults/`.

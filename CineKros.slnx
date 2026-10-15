@@ -1,5 +1,4 @@
 <Solution>
-  <Folder Name="/database/" />
   <Folder Name="/src/etl/">
     <Project Path="src/etl/CineKros.Translator/CineKros.Translator.csproj" />
     <Project Path="src/etl/CineKros.Etl/CineKros.Etl.csproj" />

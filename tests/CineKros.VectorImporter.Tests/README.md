@@ -1,17 +1,9 @@
 # CineKros.VectorImporter.Tests
 
-## Čemu služi
+Tests artifact validation and transactional catalog/vector import invariants. Run:
 
-Integracioni testovi za `CineKros.VectorImporter` i njegov vektorski artefakt. Proveravaju da se samo potpun i kompatibilan skup document vektora može transakciono povezati sa već uvezenim katalogom.
+```powershell
+dotnet test --project tests/CineKros.VectorImporter.Tests/CineKros.VectorImporter.Tests.csproj
+```
 
-## Gde se uklapa u CineKros
-
-`CineKros.VectorImporter + CineKros.Catalog.Importer → CineKros.VectorImporter.Tests`. Oba produkciona projekta su direktne reference, jer test postavlja katalog i zatim proverava uvoz vektora u PostgreSQL.
-
-## Najvažniji delovi
-
-- `VectorImporterIntegrationTests.cs` — proverava kompatibilnost artefakta, tačne MovieLens ID veze, atomski uvoz, bezbedno ponavljanje i odbijanje neispravnog stanja.
-
-## Šta bih rekao profesorki
-
-> „Ovi testovi čuvaju vezu između filma i njegovog E5 vektora. Ako se katalog, profil modela ili broj vektora ne slažu, uvoz mora stati umesto da proizvede naizgled ispravnu, ali pogrešnu pretragu.“
+Most checks use fixtures. The Serbian POC integration path is opt-in through `CINEKROS_SR_POC_TEST_ADMIN_CONNECTION`, `CINEKROS_SR_POC_ROOT`, `CINEKROS_SR_POC_INPUT_ROOT`, and `CINEKROS_SR_POC_SOURCE_CATALOG`; it creates and removes isolated disposable PostgreSQL test databases. Supply only the designated disposable test admin connection, never a persistent or production database. Full-artifact validation tests are read-only.

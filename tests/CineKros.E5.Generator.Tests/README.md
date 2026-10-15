@@ -1,18 +1,9 @@
 # CineKros.E5.Generator.Tests
 
-## Čemu služi
+Tests catalog validation, profile selection, deterministic checkpoints/resume, cancellation, and complete artifact publication. Most tests use fakes and temporary fixtures; they do not download a model or call providers. Run:
 
-Testira offline `CineKros.E5.Generator`. Većina provera koristi kontrolisani izvor vektora za deterministički checkpoint/resume; lokalni ONNX fixture proverava i stvaran 768D izlaz bez provider poziva.
+```powershell
+dotnet test --project tests/CineKros.E5.Generator.Tests/CineKros.E5.Generator.Tests.csproj
+```
 
-## Gde se uklapa u CineKros
-
-`CineKros.E5.Generator → CineKros.E5.Generator.Tests`. Test projekat direktno referencira generator; generator dalje referencira embedding biblioteku i validator kataloga.
-
-## Najvažniji delovi
-
-- `GeneratorTests.cs` — selektivni resume, očuvanje uspešnih zapisa, oporavak oštećenog checkpointa i odbijanje nekompatibilnog profila.
-- Isti fajl proverava validaciju finalnog kataloga, determinističko objavljivanje, otkazivanje i granice CLI argumenata.
-
-## Šta bih rekao profesorki
-
-> „Generator ne mora da ponavlja hiljade već završenih vektora posle prekida. Testovi dokazuju da koristi samo kompatibilne checkpoint zapise i da nepotpun izlaz nikada ne proglasi finalnim.“
+`CINEKROS_POC_ROOT` opts into checks against the local corrected POC release. Read-only full-catalog reproduction requires all three absolute paths: `CINEKROS_P8_FULLCATALOG_ROOT`, `CINEKROS_P8_VECTOR_ROOT`, and `CINEKROS_P8_MODEL_ROOT`. Those tests compare fixed EN/SR samples and do not modify published vectors.

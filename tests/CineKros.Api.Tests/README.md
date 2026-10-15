@@ -1,20 +1,9 @@
 # CineKros.Api.Tests
 
-## Čemu služi
+Tests API contracts, parser adapters, hard-filter/search behavior, and recommendation flows. Ordinary tests use fake providers and local fixtures; they do not require Gemini. Run from the repository root:
 
-Testira `CineKros.Api`: HTTP ugovor, real/fake preporučivanje, Gemini parser adapter, validaciju canonical query-ja, hard filtere i pretragu. Meša unit/contract testove sa integracionim testovima koji se pokreću uz PostgreSQL kada je test baza dostupna.
+```powershell
+dotnet test --project tests/CineKros.Api.Tests/CineKros.Api.Tests.csproj
+```
 
-## Gde se uklapa u CineKros
-
-`CineKros.Api (+ Catalog.Importer) → CineKros.Api.Tests`. Test projekat referencira oba navedena produkciona projekta. Fake HTTP/provider odgovori proveravaju ugovor bez live Gemini poziva; zasebni DB testovi proveravaju stvarni SQL i pgvector.
-
-## Najvažniji delovi
-
-- `RecommendationEndpointTests.cs` i `RealFlow/` — API envelope, lokalizacija, hard-only bez embedding poziva i hybrid tok.
-- `RealProviders/RealProviderAdapterTests.cs` — checklist DTO, rating V4 normalizacija, alerti i sanitizovane greške.
-- `Database/` i `Search/` — inkluzivne/striktne granice, null pravilo, filtriranje pre exact rangiranja i deterministički redosled.
-- `PhaseCIntegration/` — realna baza/API integracija i E5 smoke; `Startup/` i `Diagnostics/` proveravaju CORS i development log.
-
-## Šta bih rekao profesorki
-
-> „Ovi testovi dokazuju da parser ne može tiho da zaobiđe poslovna pravila: zahtev prolazi validaciju, SQL filteri su zaista strogi, a semantička putanja rangira samo dozvoljene filmove.“
+The suite includes disposable PostgreSQL integration tests that create and remove uniquely named test databases/containers. Leave `C06_TEST_DATABASE` and `C07_TEST_DATABASE` unset unless targeting their designated disposable databases. Real-data, Serbian POC, clone-readiness, production-read-only, and live parser tests are separate opt-ins gated by `C12_REAL_DATABASE`, the appropriate `CINEKROS_SR_POC_*` / `CINEKROS_SR_P10_*` values, or explicit `CINEKROS_SR_P5_*` flags. Some gates need a local E5 model and Gemini key; consult the matching source test before setting them. Never use a persistent application or production database for disposable DB tests.

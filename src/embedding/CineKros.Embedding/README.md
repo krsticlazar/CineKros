@@ -1,19 +1,28 @@
 # CineKros.Embedding
 
-## Role
+Local .NET ONNX inference for CineKros document and query embeddings. The library does not call Gemini or access a database. Offline tools use the document methods to prepare vectors; the API uses the query method during semantic requests.
 
-Local .NET inference for locked E5 ONNX profiles. The default constructor remains the legacy `e5-base-v2-int8-onnx-v1` profile and preserves its historical batching, text formatting, and fingerprints. The explicit `multilingual-e5-base-int8-onnx-v1` profile is opt-in only; it uses the locked XLM-R tokenizer, NFC normalization, and one unpadded graph sequence per inference call. It does not call Gemini or a database.
+## Profiles
 
-## Callers
+`E5EmbeddingModel(string modelDirectory)` intentionally retains the historical English `e5-base-v2-int8-onnx-v1` default for source compatibility. It is not the profile selected by the current real API startup.
 
-- [E5.Generator](../../etl/CineKros.E5.Generator/README.md) poziva document putanju pri offline izgradnji kataloških vektora.
-- API koristi query putanju pri runtime pretrazi; evaluation alat je koristi pri merenju retrieval režima. Oba toka moraju odgovarati istom profilu i fingerprint-u.
+The real bilingual API explicitly constructs `E5EmbeddingModel` with `EmbeddingProfileDescriptor.MultilingualE5Base`. Its locked profile is:
 
-## Contracts
+- Model: `intfloat/multilingual-e5-base`, revision `d128750597153bb5987e10b1c3493a34e5a4502a`.
+- Profile ID: `multilingual-e5-base-int8-onnx-v1`; output dimension: 768.
+- ONNX artifact: `model_qint8_avx512_vnni.onnx`; tokenizer: the pinned XLM-R `tokenizer.json`.
+- Query/document prefixes: `query: ` and `passage: `.
+- Maximum input: 512 tokens. Inference uses the last hidden state, masked-mean pooling, then L2 normalization in float32.
+- Multilingual-profile text uses Unicode NFC. Its graph uses a single unpadded sequence per inference call; document batches are processed sequentially with batch size one.
 
-- [E5EmbeddingModel.cs](E5EmbeddingModel.cs) proverava kontrolne sume modela i tokenizer-a, zatim inicijalizuje ONNX inferenciju.
-- `EmbedDocument` / `EmbedDocuments` use the passage prefix; `EmbedQuery` uses the query prefix. Both profiles preserve the end token when truncating at 512 tokens and apply masked mean pooling plus L2 normalization.
-- Target-profile collections remain source-compatible but execute one document at a time, in order, with batch size one and no padding. The legacy default keeps its original batched execution.
-- `ProfileFingerprint` identifies the immutable profile descriptor, including the target inference-shape policy. `ComputeDocumentFingerprint` preserves the legacy payload and uses NFC-normalized target text.
+The descriptor contains pinned artifact SHA-256 values and a profile fingerprint over the model, revision, tokenizer/graph contracts, formatting, dimension, pooling, normalization, and metric. Construction validates required artifact hashes and graph inputs/outputs before inference. The API sets `CINEKROS_E5_MODEL_DIR` to the local model artifact directory and checks that the loaded profile fingerprint matches the selected descriptor.
 
-Separate query and passage paths are part of the E5 contract. Production activation remains a separate application decision; this library only exposes explicit profile construction.
+Document and query formatting are separate parts of the embedding contract. Stored document vectors and runtime query vectors must use compatible profile fingerprints, dimensions, prefixes, tokenizer, pooling, and normalization. The API embeds only semantic queries at runtime; hard-filter-only searches do not invoke this library.
+
+## Main entry points
+
+- `EmbedDocument` and `EmbedDocuments` format input with the profile's passage prefix.
+- `EmbedQuery` formats input with the profile's query prefix and returns one 768-dimensional vector for the multilingual profile.
+- `EmbeddingProfileDescriptor.MultilingualE5Base` is the explicit bilingual runtime profile. The legacy profile remains available for historical callers and artifacts.
+
+The .NET project pins its ONNX Runtime and tokenizer dependencies in the project and lock files. Model binaries are supplied separately through `CINEKROS_E5_MODEL_DIR`; they are not downloaded by the API at request time.

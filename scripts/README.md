@@ -1,7 +1,11 @@
 # Local Workflow Scripts
 
-The active `bootstrap-e5-model.ps1` script explicitly downloads or verifies the pinned local E5 ONNX/tokenizer artifact. It lives here because both offline ETL and backend runtime share that repository-level model cache and contract. It never runs as part of normal application startup.
+`bootstrap-e5-model.ps1` explicitly downloads or verifies a pinned local ONNX model and tokenizer. It is not part of application startup. Requires PowerShell and network access for an initial download; `-VerifyOnly` checks an existing cache without downloading. `-ModelRoot` selects the shared local model cache.
 
-The default remains the legacy English profile. To explicitly bootstrap or verify the selected multilingual profile, pass `-Profile multilingual-e5-base-int8-onnx-v1`; `-ModelRoot` can point at the shared model-cache root. Existing verified files are reused, and a present cache with any hash mismatch is rejected without overwrite.
+The default profile remains the legacy English `e5-base-v2-int8-onnx-v1`. To bootstrap or verify the current multilingual profile, explicitly pass `-Profile multilingual-e5-base-int8-onnx-v1`:
 
-Workflow scripts must document prerequisites, inputs, outputs and external API usage. Installation, downloads, live provider requests and publication must be explicit actions, not hidden setup side effects.
+```powershell
+pwsh -File scripts/bootstrap-e5-model.ps1 -Profile multilingual-e5-base-int8-onnx-v1 -VerifyOnly
+```
+
+Each profile has pinned revisions and SHA-256 checks. Verified cache files are reused; a present but incomplete or mismatched profile fails without overwrite. Run without `-VerifyOnly` only when you intend to download the selected model artifacts.

@@ -1,21 +1,14 @@
 # CineKros.Evaluation
 
-## Uloga
+Standalone CLI for repeatable parser and retrieval checks. It reads a query-set JSON file and writes JSON/Markdown reports. Retrieval uses the legacy E5 constructor and non-language search overload, so this harness is not a full bilingual V5 production evaluation and makes no promise to evaluate the full production database. Reports describe only the selected cases and actual configured dataset; they are not, by themselves, academic evaluation results.
 
-Samostalni CLI za ponovljive, istraživačke provere parsera i retrieval-a; nije deo web zahteva. Čita unapred definisane slučajeve i zapisuje JSON i Markdown izveštaj. Sam izveštaj niti prisustvo opcionih ljudskih ocena ne predstavlja završenu akademsku evaluaciju: metodologija, uzorak i analiza moraju biti posebno utvrđeni.
+```powershell
+dotnet run --project src/evaluation/CineKros.Evaluation -- `
+  --queries <query-set.json> --output <report-base> --mode retrieval --case-ids <comma-separated-ids>
+```
 
-## Dva režima
+The command writes `<report-base>.json` and `<report-base>.md`.
 
-- `retrieval` proverava strukturisanu, semantičku i hibridnu pretragu nad lokalnom bazom uz E5 query vektor. Zahteva eksplicitne ID-jeve slučajeva, dostupnu bazu/model i odgovarajuće podatke. Ovo je tehničko merenje trenutnog toka.
-- `parser` poredi Gemini izlaz sa očekivanim checklist/DTO vrednostima. CLI zahteva `--live-parser` i `--max-live-calls`; to su stvarni provider pozivi, ne suvi probni režim.
+Retrieval mode requires explicit case IDs, `DATABASE_CONNECTION_STRING`, and `CINEKROS_E5_MODEL_DIR`; it queries the configured catalog and local E5 runtime. Optional `--judgments <file>` supplies human relevance judgments. It is a read/search path and writes reports only.
 
-`CliOptions.Parse` u [Program.cs](Program.cs) proverava CLI argumente, izbor slučajeva, izlazne putanje i eksplicitno odobrenje live parser poziva.
-
-## Kako čitati kod
-
-- [EvaluationModels.cs](EvaluationModels.cs) opisuje slučajeve, očekivane rezultate i izveštaj.
-- [EvaluationLogic.cs](EvaluationLogic.cs) validira query set, proverava hard-filter usklađenost i računa metrike samo kada postoje potrebne ljudske ocene.
-- [EvaluationRunner.cs](EvaluationRunner.cs) izvršava retrieval slučajeve preko `MovieSearchRepository` i [CineKros.Embedding](../../embedding/CineKros.Embedding/README.md); `EvaluationReports.Write` čuva izlaze.
-- `Program` bira režim i sastavlja rezultate. Parser putanja poziva Gemini samo uz eksplicitne CLI zastavice.
-
-Ovaj alat daje dokaz o ponašanju konkretnog skupa slučajeva i konfiguracije. Ne zamenjuje planiranu akademsku evaluaciju, ljudsko ocenjivanje niti zaključke o opštoj kvaliteti sistema.
+Parser mode makes live Gemini requests. It requires `--mode parser --live-parser --max-live-calls <positive-count>` and `GEMINI_API_KEY`; this cap limits provider calls. It cannot be run in a fixture-only mode. Keep methodology, query selection, human scoring, and interpretation separate from the tool output.

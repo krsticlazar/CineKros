@@ -1,19 +1,11 @@
 # CineKros.Catalog.Importer
 
-## Uloga
+The standard command validates the legacy 17-field JSONL catalog and imports its movie rows into PostgreSQL in one transaction. It reads `DATABASE_CONNECTION_STRING` from the process environment:
 
-CLI učitava odobreni finalni JSONL katalog, proverava ga i transakciono upisuje filmske podatke u PostgreSQL. Ne pravi katalog niti računa embeddings. Ponavljanje istog uvoza proverava postojeće stanje; drugačiji ili nepotpun sadržaj se odbija.
+```powershell
+dotnet run --project src/etl/CineKros.Catalog.Importer -- <catalog.jsonl>
+```
 
-## Mesto u toku
+The standard command does not create catalogs, generate vectors, or call providers. The catalog must include its validated manifest and identity. An identical re-import verifies existing state; incomplete or different state is rejected. Protect the target database and keep credentials out of command arguments and files.
 
-`[CineKros.Etl](../CineKros.Etl/README.md) → katalog + manifest → Catalog.Importer → movies`
-
-Validacione tipove koriste i [E5.Generator](../CineKros.E5.Generator/README.md) i [VectorImporter](../CineKros.VectorImporter/README.md), kako bi proverili da vektori pripadaju istom katalogu.
-
-## Kako čitati kod
-
-- [Program.cs](Program.cs) proverava argument putanje i uzima `DATABASE_CONNECTION_STRING` iz okruženja; zatim poziva validator pa importer.
-- [Catalog.cs](Catalog.cs) i `CatalogValidator.LoadAsync` proveravaju redove, identitete, manifest i fingerprint pre pristupa bazi.
-- [CatalogImporter.cs](CatalogImporter.cs) upisuje filmove i stanje uvoza u jednoj transakciji, uključujući proveru bezbednog ponavljanja.
-
-Importer je granica između artefakta nastalog offline i strukturisane baze. Uspela validacija kataloga je uslov za naredne korake, nije dokaz da su film-vektori već učitani.
+The separate file-only `export-full-bilingual <source.jsonl> <dictionary.json> <new-output-root>` command validates the source and dictionary and writes the full bilingual 19-field catalog to a new output root. It does not import to a database. Importing that catalog and paired vectors uses the separately gated `CineKros.VectorImporter --paired-full-cutover` rehearsal path, not the standard catalog command.

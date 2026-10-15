@@ -1,17 +1,9 @@
 # CineKros.Embedding.Tests
 
-## Čemu služi
+Checks the E5 runtime's pinned artifacts, tokenization, batching, pooling, normalized vectors, and profile fingerprints. The local acceptance tests exercise both the current multilingual batch-size-one profile and the separate legacy English default. They use local ONNX models, not providers or databases.
 
-Unit i lokalni model testovi za `CineKros.Embedding`. Proveravaju da učitavanje, tokenizacija i E5 format daju stabilan profil, a da pooling i normalizacija proizvode odgovarajuće vektore. Proveravaju i odbijanje izmenjenih model artefakata.
+```powershell
+dotnet test --project tests/CineKros.Embedding.Tests/CineKros.Embedding.Tests.csproj
+```
 
-## Gde se uklapa u CineKros
-
-`CineKros.Embedding → CineKros.Embedding.Tests`. Test projekat direktno referencira samo embedding biblioteku; ne treba mu Gemini ni PostgreSQL.
-
-## Najvažniji delovi
-
-- `E5EmbeddingTests.cs` — pinned asset/fingerprint provere, masking pri pooling-u, L2 normalizacija i ONNX izvršavanje u testnom profilu.
-
-## Šta bih rekao profesorki
-
-> „Ovi testovi proveravaju samu matematičko-tehničku granicu modela: isti model i tokenizer moraju dati kompatibilne, normalizovane vektore, a ne samo broj od 768 vrednosti.“
+Models are read from the repository's local model paths by default. Override with `CINEKROS_E5_MODEL_ROOT` and `CINEKROS_MULTILINGUAL_E5_MODEL_ROOT` when needed. `CINEKROS_PHASE1_FINAL_REPORT` optionally selects a local evidence report output path.
