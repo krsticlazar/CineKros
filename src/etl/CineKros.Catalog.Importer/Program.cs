@@ -1,5 +1,25 @@
 using CineKros.Catalog.Importer;
 
+if (args.Length > 0 && args[0] == "export-actor-catalog-v6")
+{
+    if (args.Length != 6)
+    {
+        Console.Error.WriteLine("Usage: export-actor-catalog-v6 <current-bilingual-catalog> <accepted-compact-catalog> <source-b05a-catalog> <dictionary-json> <new-output-root>");
+        return 2;
+    }
+    try
+    {
+        var release = await ActorCatalogV6.ExportAsync(args[1], args[2], args[3], args[4], args[5]);
+        Console.WriteLine($"Exported {release.MovieCount} movies; catalog SHA-256 {release.CatalogSha256}; identity {release.IdentitySha256}.");
+        return 0;
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        Console.Error.WriteLine("Actor catalog V6 validation/export failed; input data and paths were suppressed.");
+        return 1;
+    }
+}
+
 if (args.Length == 4 && args[0] == "export-full-bilingual")
 {
     try

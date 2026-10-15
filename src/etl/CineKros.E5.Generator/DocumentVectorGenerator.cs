@@ -76,7 +76,7 @@ public static class DocumentVectorGenerator
         if (published is not null) return published;
         return RunCore(catalog.CatalogPath, Path.Combine(Path.GetDirectoryName(catalog.CatalogPath)!, "manifest.json"), checkpointPath,
             outputDirectory, batchSize, source, new CatalogPolicy(catalog.CatalogVersion, catalog.CatalogSha256, catalog.IdentitySha256, catalog.Movies.Count),
-            null, new FullRunContext(catalog, language), cancellationToken, beforePublish);
+            null, new FullRunContext(FullCatalogContext.From(catalog), language), cancellationToken, beforePublish);
     }
 
     internal static RunResult? ValidatePublishedFullCatalog(FullBilingualCatalogDocument catalog, string language, string outputDirectory)
@@ -88,7 +88,38 @@ public static class DocumentVectorGenerator
         if (!Directory.Exists(outputDirectory) || !File.Exists(vectors) || !File.Exists(manifest) ||
             Directory.GetFileSystemEntries(outputDirectory).Length != 2)
             throw new InvalidDataException("Existing full-catalog output is incomplete or contains unexpected files; preserve it unchanged.");
-        return ValidateFullArtifact(vectors, manifest, new FullRunContext(catalog, language));
+        return ValidateFullArtifact(vectors, manifest, new FullRunContext(FullCatalogContext.From(catalog), language));
+    }
+
+    internal static RunResult? ValidatePublishedV6(ActorCatalogV6Document catalog, string language, string output)
+    {
+        if (language is not ("en" or "sr")) throw new ArgumentException("Language must be en or sr.");
+        if (!Path.Exists(output)) return null;
+        if (!Directory.Exists(output) || Directory.GetFileSystemEntries(output).Length != 2 ||
+            !File.Exists(Path.Combine(output, "document-vectors.jsonl")) || !File.Exists(Path.Combine(output, "manifest.json")))
+            throw new InvalidDataException("Existing V6 publication is incomplete or foreign; preserve it unchanged.");
+        return ValidateFullArtifact(Path.Combine(output, "document-vectors.jsonl"), Path.Combine(output, "manifest.json"), new(FullCatalogContext.From(catalog), language));
+    }
+
+    internal static RunResult RunV6(string checkpoint, string output, IDocumentVectorSource source, ActorCatalogV6Document catalog,
+        string language, CancellationToken token = default, Action? beforePublish = null)
+    {
+        if (source.ProfileDescriptor != EmbeddingProfileDescriptor.MultilingualE5Base || source.ProfileFingerprint != catalog.ProfileFingerprint)
+            throw new InvalidDataException("V6 requires the exact locked multilingual profile.");
+        var existing = ValidatePublishedV6(catalog, language, output);
+        if (existing is not null) return existing;
+        return RunCore(catalog.CatalogPath, Path.Combine(Path.GetDirectoryName(catalog.CatalogPath)!, "manifest.json"), checkpoint, output, 1,
+            source, new(catalog.CatalogVersion, catalog.CatalogSha256, catalog.IdentitySha256, catalog.Movies.Count), null,
+            new(FullCatalogContext.From(catalog), language), token, beforePublish);
+    }
+
+    internal static void PreflightV6Checkpoint(string path, ActorCatalogV6Document catalog, string language)
+    {
+        if (language is not ("en" or "sr")) throw new ArgumentException("Language must be en or sr.");
+        ValidateV6CheckpointHeader(path, EmbeddingProfileDescriptor.MultilingualE5Base, catalog.ProfileFingerprint,
+            new(language, catalog.IdentitySha256, language == "en" ? catalog.EnCorpusSha256 : catalog.SrCorpusSha256,
+                language == "en" ? catalog.EnTextFormatVersion : catalog.SrTextFormatVersion, true, catalog.CatalogSha256,
+                catalog.SourceCatalogSha256, catalog.DictionarySha256, catalog.SelectionIdSetSha256, FullCatalogContext.From(catalog).ActorContext));
     }
 
     internal static int SeedFullCatalogFromValidatedPocV2(string checkpointPath, FullBilingualCatalogDocument full,
@@ -179,10 +210,13 @@ public static class DocumentVectorGenerator
             full is not null ? new CheckpointIdentity(full.Language, full.Catalog.IdentitySha256,
                 full.Language == "en" ? full.Catalog.EnCorpusSha256 : full.Catalog.SrCorpusSha256, textFormat!, true,
                 full.Catalog.CatalogSha256, full.Catalog.SourceCatalogSha256, full.Catalog.DictionarySha256, full.Catalog.SelectionIdSetSha256) : null;
+        checkpointIdentity = checkpointIdentity is null ? null : checkpointIdentity with { ActorContext = full?.Catalog.ActorContext };
+        if (checkpointIdentity?.ActorContext is not null) ValidateV6CheckpointHeader(checkpointFullPath, profile, source.ProfileFingerprint, checkpointIdentity);
         var reusable = ReadCheckpoint(checkpointFullPath, profile, source.ProfileFingerprint, expected, checkpointIdentity, out var checkpointNeedsBackup);
         var complete = new Dictionary<long, VectorRow>(reusable);
         var pending = rows.Where(x => !complete.ContainsKey(x.Id)).ToArray();
         var generated = 0;
+        long lastProgress = 0;
         var truncationsAtStart = source.TruncationCount;
         if (checkpointNeedsBackup) PreserveCheckpointBackup(checkpointFullPath);
         WriteCheckpoint(checkpointFullPath, profile, source.ProfileFingerprint, complete.Values.OrderBy(x => x.MovieLensId), checkpointIdentity);
@@ -200,6 +234,11 @@ public static class DocumentVectorGenerator
             }
             generated += chunk.Length;
             AppendCheckpoint(checkpointFullPath, chunk.Select(x => complete[x.Id]));
+            if (full?.Catalog.ActorContext is not null && (generated % 100 == 0 || timer.ElapsedMilliseconds - lastProgress >= 30000))
+            {
+                Console.WriteLine($"V6 {language}: completed={complete.Count}/{rows.Count}, generated={generated}, reused={reusable.Count}, elapsedMs={timer.ElapsedMilliseconds}");
+                lastProgress = timer.ElapsedMilliseconds;
+            }
             cancellationToken.ThrowIfCancellationRequested();
         }
 
@@ -217,6 +256,8 @@ public static class DocumentVectorGenerator
         var tokenizerHash = profile.Artifact("tokenizer.json").Sha256;
         var legacy = ReferenceEquals(profile, EmbeddingProfileDescriptor.LegacyEnglish);
         var truncationDelta = multilingual ? source.TruncationCount - truncationsAtStart : source.TruncationCount;
+        if (full?.Catalog.ActorContext is not null && truncationDelta != 0)
+            throw new InvalidDataException("V6 source reported truncation; checkpoint evidence retained and publication refused.");
         object manifest = !multilingual ? new FinalManifest(ManifestFormat, policy.CatalogVersion, policy.CatalogSha256 == "*" ? HashFile(catalogFullPath) : policy.CatalogSha256,
             policy.ContentFingerprint, profile.ProfileVersion, source.ProfileFingerprint, profile.ModelId, profile.Revision,
             onnxHash, tokenizerHash, profile.Dimension, "e5-passage-semantictext-v1", "sha256-compact-json-e5-v1", profile.Pooling, profile.Normalization,
@@ -232,7 +273,7 @@ public static class DocumentVectorGenerator
                 onnxHash, tokenizerHash, profile.Dimension, "passage: ", "multilingual-document-fingerprint-v1", jsonHash, finalRows.Length,
                 "movieLensId ascending", 0, checked((int)truncationDelta), batchSize, timer.ElapsedMilliseconds,
                 profile.Pooling, profile.Normalization, profile.InferenceShapePolicy!);
-        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        var manifestBytes = SerializeBound(manifest, full?.Catalog.ActorContext, "multilingual-actor-v6-document-vectors-jsonl-v1");
         beforePublish?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
         if (checkpointOnlyOutput) PublishPocIntoCheckpointDirectory(outputFullPath, jsonBytes, manifestBytes);
@@ -297,7 +338,7 @@ public static class DocumentVectorGenerator
             {
                 using var strictHeaderDoc = JsonDocument.Parse(lines[0]);
                 var strictHeader = strictHeaderDoc.RootElement;
-                if (!StringEquals(strictHeader, "format", identity.IsFull ? FullMultilingualCheckpointFormat : MultilingualCheckpointFormat) || !IsCompatibleHeader(strictHeader, descriptor, profile, identity))
+                if (!StringEquals(strictHeader, "format", CheckpointFormatFor(identity)) || !IsCompatibleHeader(strictHeader, descriptor, profile, identity))
                 { needsBackup = true; return result; }
             }
             catch (JsonException) { needsBackup = true; return result; }
@@ -309,7 +350,7 @@ public static class DocumentVectorGenerator
                 using var headerDocument = JsonDocument.Parse(lines[0]);
                 var header = headerDocument.RootElement;
                 if (header.ValueKind == JsonValueKind.Object && header.TryGetProperty("format", out var format) &&
-                    format.ValueKind == JsonValueKind.String && (identity is null ? format.GetString() == CheckpointFormat : format.GetString() == (identity.IsFull ? FullMultilingualCheckpointFormat : MultilingualCheckpointFormat)) &&
+                    format.ValueKind == JsonValueKind.String && (identity is null ? format.GetString() == CheckpointFormat : format.GetString() == CheckpointFormatFor(identity)) &&
                     !IsCompatibleHeader(header, descriptor, profile, identity)) { needsBackup = identity is not null; return result; }
             }
             catch (JsonException) { if (identity is not null) needsBackup = true; }
@@ -324,6 +365,7 @@ public static class DocumentVectorGenerator
                     continue;
                 }
                 var row = JsonSerializer.Deserialize<VectorRow>(lines[index], JsonOptions);
+                if (identity?.ActorContext is not null) _ = ActorCatalogV6Reader.ReadStrictObject(Encoding.UTF8.GetBytes(lines[index]));
                 if (row is null || !expected.TryGetValue(row.MovieLensId, out var expectedRow) ||
                     expectedRow.Fingerprint != row.Fingerprint || expectedRow.SemanticTextSha256 != row.SemanticTextSha256 || result.ContainsKey(row.MovieLensId))
                 { if (identity is not null) needsBackup = true; continue; }
@@ -378,7 +420,34 @@ public static class DocumentVectorGenerator
         StringEquals(header, "language", identity.Language) && StringEquals(header, "catalogIdentitySha256", identity.CatalogIdentitySha256) &&
         StringEquals(header, "corpusSha256", identity.CorpusSha256) && StringEquals(header, "textFormatVersion", identity.TextFormatVersion) &&
         (!identity.IsFull || (StringEquals(header, "catalogSha256", identity.CatalogSha256!) && StringEquals(header, "sourceCatalogSha256", identity.SourceCatalogSha256!) &&
-            StringEquals(header, "dictionarySha256", identity.DictionarySha256!) && StringEquals(header, "selectionIdSetSha256", identity.SelectionIdSetSha256!)));
+            StringEquals(header, "dictionarySha256", identity.DictionarySha256!) && StringEquals(header, "selectionIdSetSha256", identity.SelectionIdSetSha256!))) &&
+        (identity.ActorContext is null || BoundEquals(header, identity.ActorContext));
+
+    private static string CheckpointFormatFor(CheckpointIdentity identity) => identity.ActorContext is not null
+        ? "multilingual-actor-v6-document-checkpoint-v1" : identity.IsFull ? FullMultilingualCheckpointFormat : MultilingualCheckpointFormat;
+
+    private static bool BoundEquals(JsonElement node, ActorBindingV6 binding) => node.TryGetProperty("actorContext", out var context) &&
+        context.GetRawText() == JsonSerializer.Serialize(binding, JsonOptions);
+
+    private static byte[] SerializeBound(object value, ActorBindingV6? binding, string format)
+    {
+        if (binding is null) return JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(value, JsonOptions)!.AsObject();
+        node["format"] = format;
+        node["actorContext"] = JsonSerializer.SerializeToNode(binding, JsonOptions);
+        return JsonSerializer.SerializeToUtf8Bytes(node, JsonOptions);
+    }
+
+    private static void ValidateV6CheckpointHeader(string path, EmbeddingProfileDescriptor profile, string fingerprint, CheckpointIdentity identity)
+    {
+        if (Directory.Exists(path)) throw new InvalidDataException("V6 checkpoint is a directory.");
+        if (!File.Exists(path)) return;
+        var lines = ReadCompleteCheckpointRecords(File.ReadAllBytes(path), out _);
+        if (lines.Length == 0) throw new InvalidDataException("V6 checkpoint has no complete trusted header; preserve it unchanged.");
+        var header = ActorCatalogV6Reader.ReadStrictObject(Encoding.UTF8.GetBytes(lines[0]));
+        if (header.EnumerateObject().Count() != 18 || !StringEquals(header, "format", CheckpointFormatFor(identity)) || !IsCompatibleHeader(header, profile, fingerprint, identity))
+            throw new InvalidDataException("Foreign or incompatible V6 checkpoint; preserve it unchanged.");
+    }
 
     private static bool StringEquals(JsonElement value, string name, string expected) =>
         value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String && property.GetString() == expected;
@@ -404,7 +473,7 @@ public static class DocumentVectorGenerator
                     new MultilingualCheckpointHeader(MultilingualCheckpointFormat, descriptor.ProfileVersion, profile, descriptor.Revision,
                         descriptor.Artifact("model_qint8_avx512_vnni.onnx").Sha256, descriptor.Artifact("tokenizer.json").Sha256, descriptor.Dimension,
                         "passage-prefix-nfc-v1", descriptor.InferenceShapePolicy!, identity.Language, identity.CatalogIdentitySha256, identity.CorpusSha256, identity.TextFormatVersion);
-                writer.WriteLine(JsonSerializer.Serialize(header, JsonOptions));
+                writer.WriteLine(Encoding.UTF8.GetString(SerializeBound(header, identity?.ActorContext, "multilingual-actor-v6-document-checkpoint-v1")));
                 foreach (var row in rows) writer.WriteLine(JsonSerializer.Serialize(row, JsonOptions));
                 writer.Flush();
             }
@@ -495,9 +564,18 @@ public static class DocumentVectorGenerator
     {
         var bytes = File.ReadAllBytes(vectorsPath);
         using var json = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
-        var root = json.RootElement;
+        var root = run.Catalog.ActorContext is null ? json.RootElement : ActorCatalogV6Reader.ReadStrictObject(File.ReadAllBytes(manifestPath));
         var profile = EmbeddingProfileDescriptor.MultilingualE5Base;
-        if (RequiredString(root, "format") != FullMultilingualManifestFormat || RequiredString(root, "language") != run.Language ||
+        if (run.Catalog.ActorContext is not null)
+        {
+            _ = new UTF8Encoding(false, true).GetString(bytes);
+            if (bytes.Length == 0 || bytes[0] != (byte)'{' || bytes[^1] != (byte)'\n' || bytes.Contains((byte)'\r') || root.EnumerateObject().Count() != 32)
+                throw new InvalidDataException("V6 publication must have the complete manifest and canonical UTF-8/LF JSONL.");
+        }
+        if (run.Catalog.ActorContext is not null && (RequiredLong(root, "elapsedMilliseconds") < 0 || RequiredString(root, "order") != "movieLensId ascending"))
+            throw new InvalidDataException("V6 publication order/timing metadata is invalid.");
+        if (RequiredString(root, "format") != (run.Catalog.ActorContext is null ? FullMultilingualManifestFormat : "multilingual-actor-v6-document-vectors-jsonl-v1") ||
+            run.Catalog.ActorContext is not null && !BoundEquals(root, run.Catalog.ActorContext) || RequiredString(root, "language") != run.Language ||
             RequiredString(root, "catalogVersion") != run.Catalog.CatalogVersion || RequiredString(root, "catalogSha256") != run.Catalog.CatalogSha256 ||
             RequiredString(root, "sourceCatalogSha256") != run.Catalog.SourceCatalogSha256 || RequiredString(root, "sourceContentFingerprint") != run.Catalog.SourceContentFingerprint ||
             RequiredString(root, "catalogContentIdentitySha256") != run.Catalog.IdentitySha256 || RequiredString(root, "selectionIdSetSha256") != run.Catalog.SelectionIdSetSha256 ||
@@ -521,6 +599,12 @@ public static class DocumentVectorGenerator
         long previousId = 0;
         for (var i = 0; i < published.Length; i++)
         {
+            if (run.Catalog.ActorContext is not null)
+            {
+                var strict = ActorCatalogV6Reader.ReadStrictObject(Encoding.UTF8.GetBytes(published[i]));
+                if (!strict.EnumerateObject().Select(x => x.Name).SequenceEqual(new[] { "movieLensId", "fingerprint", "semanticTextSha256", "vector" }))
+                    throw new InvalidDataException("V6 vector fields/order differ.");
+            }
             var row = JsonSerializer.Deserialize<VectorRow>(published[i], JsonOptions);
             var movie = run.Catalog.Movies[i];
             var text = run.Language == "en" ? movie.SemanticText : movie.SemanticTextSr;
@@ -547,14 +631,15 @@ public static class DocumentVectorGenerator
     private sealed record CheckpointHeader(string Format, string Profile, string ProfileFingerprint, string ModelRevision, string OnnxSha256, string TokenizerSha256, int Dimension, string DocumentInputFormat,
         [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? InferenceShapePolicy = null);
     private sealed record CheckpointIdentity(string Language, string CatalogIdentitySha256, string CorpusSha256, string TextFormatVersion,
-        bool IsFull = false, string? CatalogSha256 = null, string? SourceCatalogSha256 = null, string? DictionarySha256 = null, string? SelectionIdSetSha256 = null);
+        bool IsFull = false, string? CatalogSha256 = null, string? SourceCatalogSha256 = null, string? DictionarySha256 = null, string? SelectionIdSetSha256 = null,
+        ActorBindingV6? ActorContext = null);
     private sealed record MultilingualCheckpointHeader(string Format, string Profile, string ProfileFingerprint, string ModelRevision, string OnnxSha256, string TokenizerSha256,
         int Dimension, string DocumentInputFormat, string? InferenceShapePolicy, string Language, string CatalogIdentitySha256, string CorpusSha256, string TextFormatVersion);
     private sealed record FullMultilingualCheckpointHeader(string Format, string Profile, string ProfileFingerprint, string ModelRevision, string OnnxSha256, string TokenizerSha256,
         int Dimension, string DocumentInputFormat, string? InferenceShapePolicy, string Language, string CatalogIdentitySha256, string CorpusSha256, string TextFormatVersion,
         string CatalogSha256, string SourceCatalogSha256, string DictionarySha256, string SelectionIdSetSha256);
     private sealed record PocRunContext(MultilingualPocCatalogDocument Catalog, string Language);
-    private sealed record FullRunContext(FullBilingualCatalogDocument Catalog, string Language);
+    private sealed record FullRunContext(FullCatalogContext Catalog, string Language);
     private sealed record MultilingualManifest(string Format, string Language, string CatalogVersion, string CatalogSha256, string SourceCatalogSha256,
         string SourceContentFingerprint, string CatalogContentIdentitySha256, string SelectionIdSetSha256, string CorpusSha256,
         string? TranslationDictionarySha256, string TextFormatVersion, string InputNormalizationVersion, string Profile, string ProfileFingerprint,

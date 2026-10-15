@@ -8,6 +8,11 @@ using System.Text.Json;
 try
 {
     var options = GeneratorArguments.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
+    if (options.PairedV6)
+    {
+        await ActorPairedGenerationV6.RunAsync(options);
+        return 0;
+    }
     var profile = options.Profile == EmbeddingProfileDescriptor.MultilingualE5Base.ProfileVersion
         ? EmbeddingProfileDescriptor.MultilingualE5Base : EmbeddingProfileDescriptor.LegacyEnglish;
     if (options.PairedPoc)

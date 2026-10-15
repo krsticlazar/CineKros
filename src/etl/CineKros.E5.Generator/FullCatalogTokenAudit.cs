@@ -9,6 +9,10 @@ namespace CineKros.E5.Generator;
 internal static class FullCatalogTokenAudit
 {
     internal static TokenAuditResult Measure(string modelDirectory, FullBilingualCatalogDocument catalog)
+        => Measure(modelDirectory, FullCatalogContext.From(catalog));
+    internal static TokenAuditResult Measure(string modelDirectory, ActorCatalogV6Document catalog)
+        => Measure(modelDirectory, FullCatalogContext.From(catalog));
+    private static TokenAuditResult Measure(string modelDirectory, FullCatalogContext catalog)
     {
         var profile = EmbeddingProfileDescriptor.MultilingualE5Base;
         var tokenizerPath = Path.Combine(Path.GetFullPath(modelDirectory), "tokenizer.json");
@@ -30,7 +34,7 @@ internal static class FullCatalogTokenAudit
                 truncated ? E5EmbeddingModel.MaxTokens : rawTokenCount, truncated));
         }
 
-        return new TokenAuditResult("multilingual-full-catalog-token-audit-v1", catalog.IdentitySha256, actualHash,
+        return new TokenAuditResult(catalog.ActorContext is null ? "multilingual-full-catalog-token-audit-v1" : "multilingual-actor-v6-token-audit-v1", catalog.IdentitySha256, actualHash,
             documents.Count, documents.Count(x => x.Language == "en" && x.Truncated), documents.Count(x => x.Language == "sr" && x.Truncated),
             documents.Max(x => x.RawTokenCount), documents.AsReadOnly());
     }
