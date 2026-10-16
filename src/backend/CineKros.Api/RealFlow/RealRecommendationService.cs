@@ -115,6 +115,12 @@ public sealed class RealRecommendationService(
         if (selectedLanguage is null) validator.ValidateResult(parsed);
         else if (_parserProfile == QueryParserProfile.ActorV6) validator.ValidateResultV6(parsed, selectedLanguage.Value);
         else validator.ValidateResultV5(parsed, selectedLanguage.Value);
+        if (_parserProfile == QueryParserProfile.ActorV6 && parsed.LanguageCheck == "match" &&
+            HighConfidenceQueryLanguageGuard.IsMismatch(input.Message, selectedLanguage!.Value))
+        {
+            parsed = new RealParserResult("alert", AlertCode: "LANGUAGE_MISMATCH", LanguageCheck: "mismatch");
+            validator.ValidateResultV6(parsed, selectedLanguage.Value);
+        }
         if (parsed.Type == "alert")
             return new RealRecommendationResult(parsed.AlertCode, [], parsed);
 
