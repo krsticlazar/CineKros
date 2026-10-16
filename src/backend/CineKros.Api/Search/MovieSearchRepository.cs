@@ -4,6 +4,7 @@ using Npgsql;
 using Pgvector;
 using System.Security.Cryptography;
 using System.Text;
+using CineKros.Api.Diagnostics;
 
 namespace CineKros.Api.Search;
 
@@ -19,6 +20,9 @@ public sealed class MovieSearchRepository
     private readonly NpgsqlDataSource _dataSource;
     private readonly string _expectedEmbeddingProfileFingerprint;
     private readonly SearchDatasetExpectation? _datasetExpectation;
+    private ActorNameResolver? _actorResolver;
+    private DevelopmentSqlTrace? _sqlTrace;
+    public ActorNameResolver ActorResolver => _actorResolver ?? throw SearchUnavailable();
 
     public MovieSearchRepository(NpgsqlDataSource dataSource, string expectedEmbeddingProfileFingerprint)
     {
@@ -45,6 +49,15 @@ public sealed class MovieSearchRepository
     public static async Task<MovieSearchRepository> CreateFullBilingualProductionRepositoryAsync(NpgsqlDataSource dataSource,
         CancellationToken cancellationToken = default)
         => await CreateDatasetRepositoryAsync(dataSource, SearchDatasetExpectation.FullBilingualProduction, cancellationToken);
+
+    public static async Task<MovieSearchRepository> CreateIsolatedV6RepositoryAsync(NpgsqlDataSource dataSource,
+        DevelopmentSqlTrace? sqlTrace = null, CancellationToken cancellationToken = default)
+    {
+        var repository = await CreateDatasetRepositoryAsync(dataSource, V6SearchDatasetExpectation.Isolated, cancellationToken);
+        repository._sqlTrace = sqlTrace;
+        await repository.EnsureRuntimeReadyAsync(cancellationToken);
+        return repository;
+    }
 
     private static async Task<MovieSearchRepository> CreateDatasetRepositoryAsync(NpgsqlDataSource dataSource,
         Func<string, SearchDatasetExpectation> expectationFactory, CancellationToken cancellationToken)
@@ -76,6 +89,7 @@ public sealed class MovieSearchRepository
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(queryVector);
+        ValidateActorFilters(hardFilters, allowV6: false);
         ValidateQueryVector(queryVector);
         var filtered = HardFilterSqlBuilder.Build(hardFilters);
 
@@ -97,6 +111,7 @@ public sealed class MovieSearchRepository
         CancellationToken cancellationToken = default)
     {
         if (_datasetExpectation is null) throw SearchUnavailable();
+        ValidateActorFilters(hardFilters, allowV6: true);
         var vectorColumn = SearchLanguageColumn.For(language);
         ArgumentNullException.ThrowIfNull(queryVector);
         ValidateQueryVector(queryVector);
@@ -108,6 +123,7 @@ public sealed class MovieSearchRepository
         await using var command = new NpgsqlCommand(sql, connection);
         filtered.AddParameters(command);
         command.Parameters.AddWithValue("queryVector", new Vector(queryVector));
+        _sqlTrace?.Write(command, language);
         return await ReadMoviesAsync(command, cancellationToken);
     }
 
@@ -132,7 +148,8 @@ public sealed class MovieSearchRepository
         var artifact = language == SearchLanguage.English ? e.EnArtifactSha256 : e.SrArtifactSha256;
         var fingerprintColumn = language == SearchLanguage.English ? "document_fingerprint" : "document_fingerprint_sr";
         var embeddingColumn = language == SearchLanguage.English ? "embedding" : "embedding_sr";
-        var format = language == SearchLanguage.English ? "en-title-year-director-cast-tags-v1" : "sr-title-year-director-cast-tags-latn-v1";
+        var format = language == SearchLanguage.English ? e.EnTextFormatVersion : e.SrTextFormatVersion;
+        if (e.Actors is not null) await ActorDatasetReadiness.EnsurePinsAsync(connection, e, ct);
         var sql = $"SELECT current_database()=@db AND current_schema()='public' AND (SELECT count(*) FROM movies)=@n AND (SELECT count(*) FROM movie_embeddings)=@n AND (SELECT count(*) FROM movie_embeddings WHERE {embeddingColumn} IS NOT NULL AND {fingerprintColumn} ~ '^[0-9a-f]{{64}}$' AND vector_dims({embeddingColumn})=768 AND abs(vector_norm({embeddingColumn})-1)<=0.0001)=@n AND EXISTS(SELECT 1 FROM catalog_import_state WHERE id=1 AND catalog_version=@version AND btrim(catalog_jsonl_sha256)=@catalog AND btrim(catalog_content_fingerprint)=@identity AND movie_count=@n AND btrim(embedding_profile_fingerprint)=@profile AND btrim(embedding_artifact_sha256)=@catalogEnArtifact AND embedded_count=@n) AND EXISTS(SELECT 1 FROM embedding_set_state WHERE language=@lang AND btrim(profile_fingerprint)=@profile AND btrim(catalog_content_fingerprint)=@identity AND btrim(corpus_sha256)=@corpus AND text_format_version=@format AND btrim(artifact_sha256)=@artifact AND btrim(COALESCE(translation_dictionary_sha256,''))=@dictionary AND dimension=768 AND embedded_count=@n) AND (SELECT count(*) FROM embedding_set_state)=2 AND (SELECT count(*) FROM embedding_set_state WHERE language=@lang)=1";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("db", e.DatabaseName); command.Parameters.AddWithValue("n", e.MovieCount);
@@ -150,6 +167,13 @@ public sealed class MovieSearchRepository
     public async Task EnsureRuntimeReadyAsync(CancellationToken cancellationToken = default)
     {
         if (_datasetExpectation is null) throw SearchUnavailable();
+        if (_datasetExpectation.Actors is not null)
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+            var verified = await ActorDatasetReadiness.VerifyAndLoadAsync(connection, _datasetExpectation, cancellationToken);
+            // Preserve the initially verified immutable registry for all requests.
+            _actorResolver ??= verified;
+        }
         await EnsureSelectedLanguageReadyAsync(SearchLanguage.English, cancellationToken);
         await EnsureSelectedLanguageReadyAsync(SearchLanguage.Serbian, cancellationToken);
     }
@@ -157,6 +181,7 @@ public sealed class MovieSearchRepository
     private async Task EnsureDatasetCatalogReadyAsync(NpgsqlConnection connection, CancellationToken ct)
     {
         var e = _datasetExpectation!;
+        if (e.Actors is not null) await ActorDatasetReadiness.EnsurePinsAsync(connection, e, ct);
         const string sql = "SELECT current_database()=@db AND current_schema()='public' AND (SELECT count(*) FROM movies)=@n AND EXISTS(SELECT 1 FROM catalog_import_state WHERE id=1 AND catalog_version=@version AND btrim(catalog_jsonl_sha256)=@catalog AND btrim(catalog_content_fingerprint)=@identity AND movie_count=@n)";
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("db", e.DatabaseName); command.Parameters.AddWithValue("n", e.MovieCount);
@@ -171,7 +196,7 @@ public sealed class MovieSearchRepository
         // Keep the legacy 150-row POC delimiter while matching the full catalog's canonical newline-delimited identity.
         const string sql = "SELECT string_agg(movie_lens_id::text, CASE WHEN @full THEN E'\\n' ELSE ',' END ORDER BY movie_lens_id) || E'\\n' FROM movies";
         await using var command = new NpgsqlCommand(sql, connection);
-        command.Parameters.AddWithValue("full", expectation.CatalogVersion == SearchDatasetExpectation.FullProductionCatalogVersion);
+        command.Parameters.AddWithValue("full", expectation.UsesFullLfIdEncoding || expectation.CatalogVersion == SearchDatasetExpectation.FullProductionCatalogVersion);
         var value = (string?)await command.ExecuteScalarAsync(ct);
         return value is not null && Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value))) == expectation.SelectionIdSetSha256;
     }
@@ -180,6 +205,7 @@ public sealed class MovieSearchRepository
         RealHardFilters hardFilters,
         CancellationToken cancellationToken = default)
     {
+        ValidateActorFilters(hardFilters, allowV6: true);
         var filtered = HardFilterSqlBuilder.Build(hardFilters);
         if (string.IsNullOrEmpty(filtered.WhereSql))
             throw new RealProviderException("PARSER_INVALID_RESPONSE");
@@ -192,7 +218,16 @@ public sealed class MovieSearchRepository
         const string order = " ORDER BY rating_count DESC NULLS LAST, average_rating DESC NULLS LAST, movie_lens_id ASC LIMIT 10";
         await using var command = new NpgsqlCommand(select + filtered.WhereSql + order, connection);
         filtered.AddParameters(command);
+        _sqlTrace?.Write(command, null);
         return await ReadMoviesAsync(command, cancellationToken);
+    }
+
+    private void ValidateActorFilters(RealHardFilters filters, bool allowV6)
+    {
+        if (filters.Actors is null) return;
+        if (!allowV6 || _datasetExpectation?.Actors is null) throw new RealProviderException("PARSER_INVALID_RESPONSE");
+        if (_actorResolver is null) throw SearchUnavailable();
+        HardFilterSqlBuilder.ValidateActorMembership(filters, _actorResolver);
     }
 
     private async Task EnsureCatalogReadyAsync(NpgsqlConnection connection, bool semantic, CancellationToken cancellationToken)

@@ -22,6 +22,8 @@
     <Content Include="RealProviders/query-parser.schema.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="RealProviders/query-parser-v5.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="RealProviders/query-parser-v5.schema.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser-v6.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="RealProviders/query-parser-v6.schema.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

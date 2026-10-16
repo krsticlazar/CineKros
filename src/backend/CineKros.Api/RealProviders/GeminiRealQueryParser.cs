@@ -6,8 +6,9 @@ using CineKros.Api.Search;
 namespace CineKros.Api.RealProviders;
 
 /// <summary>Gemini structured-output adapter. It is intentionally not registered by the fake API host.</summary>
-public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, string systemInstruction, string responseSchema, RealParsedQueryValidator validator, ILogger<GeminiRealQueryParser>? logger = null, bool isDevelopment = false, bool languageAware = false)
+public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, string systemInstruction, string responseSchema, RealParsedQueryValidator validator, ILogger<GeminiRealQueryParser>? logger = null, bool isDevelopment = false, bool languageAware = false, QueryParserProfile? parserProfile = null)
 {
+    private readonly QueryParserProfile profile = SelectProfile(languageAware, parserProfile);
     public const string Model = "gemini-3.1-flash-lite";
     private static readonly Uri BaseUri = new("https://generativelanguage.googleapis.com/v1beta/models/", UriKind.Absolute);
 
@@ -34,16 +35,23 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
             using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
-                LogDevelopmentFailure($"HTTP status {(int)response.StatusCode}");
+                var retryAfter = response.Headers.RetryAfter;
+                var retryDiagnostic = retryAfter?.Delta is { } delta
+                    ? $"; Retry-After seconds={delta.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                    : retryAfter?.Date is { } date ? $"; Retry-After UTC={date.UtcDateTime:O}" : string.Empty;
+                LogDevelopmentFailure($"HTTP status {(int)response.StatusCode}{retryDiagnostic}");
                 throw new RealProviderException("PROVIDER_UNAVAILABLE");
             }
             var providerJson = await response.Content.ReadAsStringAsync(timeout.Token);
             providerTimer.Stop();
             var structuredText = ExtractText(providerJson);
             string checklistEvidence;
-            var parsed = languageAware
-                ? validator.ValidateV5(structuredText, ParseSelectedLanguage(language), out checklistEvidence)
-                : validator.Validate(structuredText, out checklistEvidence);
+            var parsed = profile switch
+            {
+                QueryParserProfile.ActorV6 => validator.ValidateV6(structuredText, ParseSelectedLanguage(language), out checklistEvidence),
+                QueryParserProfile.LanguageAwareV5 => validator.ValidateV5(structuredText, ParseSelectedLanguage(language), out checklistEvidence),
+                _ => validator.Validate(structuredText, out checklistEvidence)
+            };
             if (isDevelopment)
             {
                 logger?.LogInformation("Validated Gemini provider checklist (Development): {ProviderChecklistEvidence}", checklistEvidence);
@@ -86,6 +94,14 @@ public sealed class GeminiRealQueryParser(HttpClient httpClient, string apiKey, 
         "sr" => SearchLanguage.Serbian,
         _ => throw new RealProviderException("PARSER_INVALID_RESPONSE")
     };
+
+    private static QueryParserProfile SelectProfile(bool languageAware, QueryParserProfile? selected)
+    {
+        if (selected is null) return languageAware ? QueryParserProfile.LanguageAwareV5 : QueryParserProfile.LegacyV4;
+        if (!Enum.IsDefined(selected.Value) || (selected == QueryParserProfile.LegacyV4) == languageAware)
+            throw new ArgumentException("Parser profile and languageAware selection must agree.", nameof(selected));
+        return selected.Value;
+    }
 
     private void LogDevelopmentFailure(string cause)
     {

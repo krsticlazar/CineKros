@@ -57,10 +57,20 @@ public sealed class RealRecommendationService(
     RealParsedQueryValidator validator,
     IRealQueryEmbeddingProvider embeddings,
     IRealMovieSearch search,
-    bool languageAwarePoc = false)
+    bool languageAwarePoc = false,
+    QueryParserProfile? parserProfile = null)
 {
+    private readonly QueryParserProfile _parserProfile = ResolveProfile(languageAwarePoc, parserProfile);
     public bool LanguageAware { get; } = languageAwarePoc;
     public bool LanguageAwarePoc => LanguageAware;
+
+    private static QueryParserProfile ResolveProfile(bool languageAware, QueryParserProfile? profile)
+    {
+        var resolved = profile ?? (languageAware ? QueryParserProfile.LanguageAwareV5 : QueryParserProfile.LegacyV4);
+        if (!Enum.IsDefined(resolved) || languageAware != (resolved != QueryParserProfile.LegacyV4))
+            throw new ArgumentException("The parser profile and language-aware mode must agree.", nameof(profile));
+        return resolved;
+    }
 
     public Task<RealRecommendationResult> RecommendAsync(ParserInput input, CancellationToken cancellationToken)
     {
@@ -103,6 +113,7 @@ public sealed class RealRecommendationService(
         catch (RealProviderException) { throw; }
         catch { throw new RealProviderException("PROVIDER_UNAVAILABLE"); }
         if (selectedLanguage is null) validator.ValidateResult(parsed);
+        else if (_parserProfile == QueryParserProfile.ActorV6) validator.ValidateResultV6(parsed, selectedLanguage.Value);
         else validator.ValidateResultV5(parsed, selectedLanguage.Value);
         if (parsed.Type == "alert")
             return new RealRecommendationResult(parsed.AlertCode, [], parsed);

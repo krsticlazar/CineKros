@@ -73,3 +73,15 @@ The full multilingual runtime uses the language-aware MovieSearchRepository.Sear
 The frontend request and response contract is defined in src/frontend/src/types.ts; its API origin validation is in src/frontend/src/apiConfiguration.ts.
 
 For a local Windows launch, see the [normal startup launcher](../../start_script.cmd). The [Serbian POC launcher](../../start_poc.cmd) is separate from the normal full runtime.
+
+## Isolated actor V6 runtime
+
+An unset `CINEKROS_RUNTIME_PROFILE`, or the explicit value `v5`, keeps the current runtime selection. The separate `actor-v6-isolated` value requires real mode, Development, `CINEKROS_SERBIAN_POC` unset/false, and the exact configured and actual database `cinekros_v6_rehearsal_20261015t2154z_4fd266aa`. Use a separate process on `http://localhost:5186` with existing secrets and model directory supplied only through its process environment; do not change normal launchers or production configuration. The connection enforces read-only transactions. Startup performs no migration/import.
+
+This profile explicitly binds the V6 prompt/schema/validator to the accepted V6 catalog, actor provenance, both language corpora/formats/vector artifacts, and unchanged E5 model profile. Startup checks the full schema (including cast helper/CHECK/GIN definitions), migration ledger, all 9,730 ordered cast assignments and exact ordinal vocabulary before caching an immutable resolver. The schema hash uses the same exact SQL serialization as the importer, duplicated deliberately at the read-only runtime boundary without a runtime importer dependency. Full readiness can be called again to detect out-of-band corruption; such writes require reverification/restart. Per-request hard-only checks catalog and actor release state; semantic requests additionally check the selected vector language, with no fallback.
+
+Actors use canonical `all`, `any`, and `exclude` groups, conjoined with every other hard filter. Active actor filters require known nonempty recorded cast, including exclusion-only queries. Names are typed `text[]` parameters; unknown or noncanonical injected names fail validation. Actor-only requests skip E5 and selected-language preflight. Actor-plus-soft-intent requests retain eligible-first exact cosine ranking, ascending-ID ties and at most ten cards. These guarantees apply to the catalog's recorded cast, not independently verified complete credits.
+
+Optional `CINEKROS_V6_SQL_DIAGNOSTICS=true` is accepted only in this isolated Development profile. It prints executed command text, typed filter parameters, selected language when present, and available trace correlation. Query vector values, credentials and connection strings are excluded. It defaults off. The public HTTP request/response envelope is unchanged.
+
+Offline checks are `V6SearchTests`; the separate `V6SearchIntegrationTests` method skips by default and requires an explicitly named new `cinekros_v6_test_p4_*` clone, a matching connection and its dedicated opt-in. It refuses production, rehearsal, POCs and unrelated clones before mutation. It does not create/drop databases, regenerate vectors or call a provider.

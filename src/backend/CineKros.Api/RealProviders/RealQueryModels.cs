@@ -8,9 +8,11 @@ public sealed record RealHardFilters(
     RealGenreFilter? Genres = null,
     decimal? RatingMin = null,
     string? OriginalLanguage = null,
-    string? RatingOperator = null);
+    string? RatingOperator = null,
+    RealActorFilter? Actors = null);
 
 public sealed record RealGenreFilter(IReadOnlyList<string>? All = null, IReadOnlyList<string>? Any = null);
+public sealed record RealActorFilter(IReadOnlyList<string>? All = null, IReadOnlyList<string>? Any = null, IReadOnlyList<string>? Exclude = null);
 public sealed record RealParsedQuery(RealHardFilters HardFilters, string? SemanticQuery);
 public sealed record RealParserResult(string Type, RealParsedQuery? Query = null, string? AlertCode = null, string? LanguageCheck = null);
 

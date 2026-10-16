@@ -1,6 +1,7 @@
 using CineKros.Api.RealProviders;
 using Npgsql;
 using NpgsqlTypes;
+using System.Text;
 
 namespace CineKros.Api.Database;
 
@@ -70,6 +71,20 @@ public static class HardFilterSqlBuilder
             parameters.Add(("ratingMin", NpgsqlDbType.Numeric, ratingMin));
         }
         Add(filters.OriginalLanguage, "original_language = @originalLanguage", "originalLanguage", NpgsqlDbType.Text, clauses, parameters);
+        if (filters.Actors is { } actors)
+        {
+            clauses.Add("\"cast\" IS NOT NULL AND cardinality(\"cast\") > 0");
+            AddActors(actors.All, "\"cast\" @> @actorsAll::text[]", "actorsAll");
+            AddActors(actors.Any, "\"cast\" && @actorsAny::text[]", "actorsAny");
+            AddActors(actors.Exclude, "NOT (\"cast\" && @actorsExclude::text[])", "actorsExclude");
+        }
+
+        void AddActors(IReadOnlyList<string>? values, string clause, string name)
+        {
+            if (values is null) return;
+            clauses.Add(clause);
+            parameters.Add((name, NpgsqlDbType.Array | NpgsqlDbType.Text, values.ToArray()));
+        }
 
         return new FilteredMovieQuery(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses), parameters.ToArray());
     }
@@ -85,10 +100,37 @@ public static class HardFilterSqlBuilder
             filters.OriginalLanguage is not null && !Languages.Contains(filters.OriginalLanguage))
             Invalid();
 
+        ValidateActors(filters.Actors);
         if (filters.Genres is not { } genreFilter) return;
         if (genreFilter.All is null && genreFilter.Any is null) Invalid();
         ValidateGenres(genreFilter.All);
         ValidateGenres(genreFilter.Any);
+    }
+
+    private static void ValidateActors(RealActorFilter? actors)
+    {
+        if (actors is null) return;
+        if (actors.All is null && actors.Any is null && actors.Exclude is null) Invalid();
+        foreach (var group in new[] { actors.All, actors.Any, actors.Exclude })
+        {
+            if (group is null) continue;
+            if (group.Count == 0) Invalid();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var name in group)
+                if (string.IsNullOrWhiteSpace(name) || name != name.Trim() || !name.IsNormalized(NormalizationForm.FormC) || name.Any(char.IsControl) || !seen.Add(name)) Invalid();
+        }
+        var excluded = new HashSet<string>(actors.Exclude ?? [], StringComparer.Ordinal);
+        if (actors.All?.Any(excluded.Contains) == true || actors.Any is { } any && any.All(excluded.Contains)) Invalid();
+    }
+
+    public static void ValidateActorMembership(RealHardFilters filters, ActorNameResolver? resolver)
+    {
+        ArgumentNullException.ThrowIfNull(filters);
+        ValidateActors(filters.Actors);
+        if (filters.Actors is not { } actors) return;
+        if (resolver is null) Invalid();
+        foreach (var name in (actors.All ?? []).Concat(actors.Any ?? []).Concat(actors.Exclude ?? []))
+            if (!resolver!.IsCanonical(name)) Invalid();
     }
 
     private static void ValidateGenres(IReadOnlyList<string>? values)
@@ -120,12 +162,13 @@ public static class HardFilterSqlBuilder
 public sealed record FilteredMovie(long MovieLensId, string Title, int Year, string ImdbId, string? PosterPath, decimal? AverageRating, long? RatingCount);
 
 /// <summary>Executes the unranked filtered movie relation; ranking is owned by the search layer.</summary>
-public sealed class FilteredMovieRepository(NpgsqlDataSource dataSource)
+public sealed class FilteredMovieRepository(NpgsqlDataSource dataSource, ActorNameResolver? actorResolver = null)
 {
     private const string SelectSql = "SELECT movie_lens_id, title, year, imdb_id, poster_path, average_rating, rating_count FROM movies";
 
     public async Task<IReadOnlyList<FilteredMovie>> ReadAsync(RealHardFilters filters, CancellationToken cancellationToken = default)
     {
+        HardFilterSqlBuilder.ValidateActorMembership(filters, actorResolver);
         var query = HardFilterSqlBuilder.Build(filters);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(SelectSql + " " + query.WhereSql, connection);

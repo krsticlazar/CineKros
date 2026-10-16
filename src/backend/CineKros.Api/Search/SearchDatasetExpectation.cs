@@ -25,6 +25,10 @@ public sealed record SearchDatasetExpectation(string DatabaseName, int MovieCoun
 
     public string CatalogVersion { get; internal init; } = "B05a-bilingual-catalog-v2";
     public string SelectionIdSetSha256 { get; internal init; } = MultilingualPocCatalog.SelectionIdSetSha256;
+    public bool UsesFullLfIdEncoding { get; internal init; }
+    public string EnTextFormatVersion { get; internal init; } = "en-title-year-director-cast-tags-v1";
+    public string SrTextFormatVersion { get; internal init; } = "sr-title-year-director-cast-tags-latn-v1";
+    public V6SearchDatasetExpectation? Actors { get; internal init; }
 
     public static SearchDatasetExpectation FullBilingualProduction(string actualDatabase)
     {
@@ -35,6 +39,7 @@ public sealed record SearchDatasetExpectation(string DatabaseName, int MovieCoun
             FullProductionEnArtifactSha256, FullProductionSrArtifactSha256, FullProductionDictionarySha256)
         {
             CatalogVersion = FullProductionCatalogVersion,
+            UsesFullLfIdEncoding = true,
             SelectionIdSetSha256 = FullProductionSelectionIdSetSha256
         };
     }
@@ -71,6 +76,42 @@ public sealed record SearchDatasetExpectation(string DatabaseName, int MovieCoun
         {
             CatalogVersion = "B05a-bilingual-catalog-v2",
             SelectionIdSetSha256 = MultilingualPocCatalog.SelectionIdSetSha256
+        };
+    }
+}
+
+/// <summary>Exact isolated V6 release; never selected implicitly from a database name.</summary>
+public sealed record V6SearchDatasetExpectation
+{
+    public const string Database = "cinekros_v6_rehearsal_20261015t2154z_4fd266aa";
+    public const string VocabularySha256 = "7427b92ae216dfc59f53d46e0a936971fab93015ce5807e3991e59b01e960de3";
+    public const string MappingSha256 = "7de357a36207770d772ea351fedbeea7146b4dc6e13a41d3a518189523b2c0c8";
+    public const string OverridesSha256 = "3078b4c0ddbe59d6e6f5087d0ea7254d764e36a6f905c1c91ce699c3f38ba33d";
+    public const string RulesSha256 = "9c34722165a8e6d15a950c95bccf0eed27d1bffc85ee71c346c73cabddd4ec0d";
+    public const string PairSha256 = "68011ca794b2adfb1ddc5058aa940d40b82cd8fb7ae64a7da40f8ea583da3bc5";
+    public const string BaselineSha256 = "555a7aadf44ea88001bc903dab60a2d96c470b236e3b4b5d273733452d2fa0df";
+    public const string SchemaSha256 = "1975494c9655a14e08731ecd583673a8fbeb76c46f16078d0e4612fab61d6407";
+    public const string Migration003Sha256 = "66eb1ea4a8130e49db24a9ccee29bad13aab7ed51cd385279f7188d00def1daa";
+
+    public static SearchDatasetExpectation Isolated(string actualDatabase)
+    {
+        if (actualDatabase != Database) throw new InvalidOperationException("V6 search requires the exact isolated rehearsal database.");
+        return new(actualDatabase, 9730,
+            "30b9b7ee9ef0f94cb1427e4b1921a296ba3692c621ac869c17e8c45dff3a7925",
+            "03e452c345576b5f369834e89016d43902259aa1903697b8b92123e4ea66f5d3",
+            SearchDatasetExpectation.FullProductionProfileFingerprint,
+            "38355e10039d885161e3523ee1e5a66411d80d7f35b57992db83d75fe8242c6e",
+            "0b11455b7a3159d4fe7e7924d36521907112e03d7381c394c40599a57c4ecad1",
+            "4593ce51cc7b981e07dba50cfe950d0daa3d1cc6a74d43a47c1038e341c5ff09",
+            "5f62b1351d691204b273b55693ab54e37e04ece57a50df9d2cc8e68306d98275",
+            SearchDatasetExpectation.FullProductionDictionarySha256)
+        {
+            CatalogVersion = ActorCatalogV6.CatalogVersion,
+            SelectionIdSetSha256 = ActorCatalogV6.OrderedIdsSha256,
+            UsesFullLfIdEncoding = true,
+            EnTextFormatVersion = ActorCatalogV6.EnTextFormatVersion,
+            SrTextFormatVersion = ActorCatalogV6.SrTextFormatVersion,
+            Actors = new()
         };
     }
 }

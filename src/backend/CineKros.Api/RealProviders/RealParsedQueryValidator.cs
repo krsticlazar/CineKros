@@ -10,6 +10,9 @@ namespace CineKros.Api.RealProviders;
 /// <summary>Validates the mandatory provider checklist and maps it to the existing canonical DTO.</summary>
 public sealed class RealParsedQueryValidator
 {
+    private readonly ActorNameResolver? actorResolver;
+
+    public RealParsedQueryValidator(ActorNameResolver? actorResolver = null) => this.actorResolver = actorResolver;
     private static readonly HashSet<string> Genres = new(StringComparer.Ordinal)
     {
         "Action", "Adventure", "Animation", "Children", "Comedy", "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror", "IMAX", "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"
@@ -38,6 +41,9 @@ public sealed class RealParsedQueryValidator
 
     /// <summary>Validates and returns a compact serialization of only the accepted provider checklist fields.</summary>
     public RealParserResult Validate(string json, out string providerChecklistEvidence)
+        => ValidateChecklist(json, false, out providerChecklistEvidence);
+
+    private RealParserResult ValidateChecklist(string json, bool actorV6, out string providerChecklistEvidence)
     {
         providerChecklistEvidence = string.Empty;
         try
@@ -56,8 +62,11 @@ public sealed class RealParsedQueryValidator
             }
             if (type != "query" || Required(root, "alertCode").ValueKind != JsonValueKind.Null) Invalid();
 
-            var query = ReadFields(Required(root, "query"), "year", "runtime", "genres", "rating", "originalLanguage", "semanticQuery");
-            RequireOnly(query, "year", "runtime", "genres", "rating", "originalLanguage", "semanticQuery");
+            string[] queryKeys = actorV6
+                ? ["year", "runtime", "genres", "rating", "originalLanguage", "semanticQuery", "actors"]
+                : ["year", "runtime", "genres", "rating", "originalLanguage", "semanticQuery"];
+            var query = ReadFields(Required(root, "query"), queryKeys);
+            RequireOnly(query, queryKeys);
             var year = ReadBounds(Required(query, "year"), "min", "max", 1000, 9999);
             var runtime = ReadBounds(Required(query, "runtime"), "min", "max", 1, int.MaxValue);
             if (year.Min > year.Max || runtime.Min > runtime.Max) Invalid();
@@ -66,6 +75,7 @@ public sealed class RealParsedQueryValidator
             var language = ReadScalar(Required(query, "originalLanguage"), "value", ReadNullableString);
             if (language.Value is not null && !Languages.Contains(language.Value)) Invalid();
             var semantic = ReadSemantic(Required(query, "semanticQuery"));
+            var actors = actorV6 ? ReadActors(Required(query, "actors")) : default;
 
             providerChecklistEvidence = JsonSerializer.Serialize(new
             {
@@ -77,8 +87,15 @@ public sealed class RealParsedQueryValidator
                 originalLanguage = new { status = language.Status, value = language.Value },
                 semanticQuery = semantic is null ? "absent" : "present"
             });
+            if (actorV6)
+            {
+                using var originalEvidence = JsonDocument.Parse(providerChecklistEvidence);
+                var evidenceFields = originalEvidence.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
+                evidenceFields.Add("actors", new { status = actors.Status, all = actors.Value?.All ?? [], any = actors.Value?.Any ?? [], exclude = actors.Value?.Exclude ?? [] });
+                providerChecklistEvidence = JsonSerializer.Serialize(evidenceFields);
+            }
 
-            if (year.Unsupported || runtime.Unsupported || genre.Unsupported || rating.Unsupported || language.Unsupported)
+            if (year.Unsupported || runtime.Unsupported || genre.Unsupported || rating.Unsupported || language.Unsupported || actors.Unsupported)
                 return new RealParserResult("alert", AlertCode: "UNSUPPORTED_REQUEST");
 
             decimal? ratingMin = null;
@@ -89,7 +106,14 @@ public sealed class RealParsedQueryValidator
                 ratingMin = normalizedRating;
             }
 
-            var hardFilters = new RealHardFilters(year.Min, year.Max, runtime.Min, runtime.Max, genre.Value, ratingMin, language.Value, rating.Status == "present" ? rating.Operator : null);
+            RealActorFilter? canonicalActors = null;
+            if (actors.Value is not null)
+            {
+                if (actorResolver is null) throw new RealProviderException("SEARCH_UNAVAILABLE");
+                canonicalActors = ResolveActors(actors.Value);
+                if (canonicalActors is null) return new RealParserResult("alert", AlertCode: "QUERY_UNCLEAR");
+            }
+            var hardFilters = new RealHardFilters(year.Min, year.Max, runtime.Min, runtime.Max, genre.Value, ratingMin, language.Value, rating.Status == "present" ? rating.Operator : null, canonicalActors);
             if (semantic is null && !HasActiveFilter(hardFilters)) Invalid();
             return new RealParserResult("query", new RealParsedQuery(hardFilters, semantic));
         }
@@ -102,6 +126,9 @@ public sealed class RealParsedQueryValidator
 
     /// <summary>Rechecks typed canonical results at the orchestration boundary, including injected implementations.</summary>
     public void ValidateResult(RealParserResult? result)
+        => ValidateResultCore(result, false);
+
+    private void ValidateResultCore(RealParserResult? result, bool actorV6)
     {
         if (result is null) Invalid();
         if (result.Type == "alert")
@@ -111,8 +138,15 @@ public sealed class RealParsedQueryValidator
         }
         if (result.Type != "query" || result.AlertCode is not null || result.Query is null || result.Query.HardFilters is null) Invalid();
         var filters = result.Query.HardFilters;
+        if (!actorV6 && filters.Actors is not null) Invalid();
         try { _ = HardFilterSqlBuilder.Build(filters); }
         catch (RealProviderException) { Invalid(); }
+        if (filters.Actors is not null)
+        {
+            if (actorResolver is null) throw new RealProviderException("SEARCH_UNAVAILABLE");
+            foreach (var name in (filters.Actors.All ?? []).Concat(filters.Actors.Any ?? []).Concat(filters.Actors.Exclude ?? []))
+                if (!actorResolver.IsCanonical(name)) Invalid();
+        }
         var semantic = result.Query.SemanticQuery;
         if (semantic is null)
         {
@@ -123,6 +157,14 @@ public sealed class RealParsedQueryValidator
 
     /// <summary>Validates the strict v5 envelope and its language branch, then applies the unchanged v4 checklist rules.</summary>
     public RealParserResult ValidateV5(string json, SearchLanguage selectedLanguage, out string evidence)
+        => ValidateLanguageEnvelope(json, selectedLanguage, false, out evidence);
+
+    public RealParserResult ValidateV6(string json, SearchLanguage language, out string evidence)
+        => ValidateLanguageEnvelope(json, language, true, out evidence);
+
+    public RealParserResult ValidateV6(string json, SearchLanguage language) => ValidateV6(json, language, out _);
+
+    private RealParserResult ValidateLanguageEnvelope(string json, SearchLanguage selectedLanguage, bool actorV6, out string evidence)
     {
         evidence = string.Empty;
         if (selectedLanguage is not (SearchLanguage.English or SearchLanguage.Serbian)) Invalid();
@@ -143,7 +185,7 @@ public sealed class RealParsedQueryValidator
             {
                 if (languageCheck != "match" || alertValue.ValueKind != JsonValueKind.Null) Invalid();
                 var legacyJson = JsonSerializer.Serialize(new { type, query = queryValue, alertCode = (string?)null });
-                result = Validate(legacyJson, out checklist);
+                result = ValidateChecklist(legacyJson, actorV6, out checklist);
                 result = result with { LanguageCheck = languageCheck };
             }
             else if (type == "alert")
@@ -192,12 +234,18 @@ public sealed class RealParsedQueryValidator
 
     /// <summary>Rechecks injected v5 DTOs at the orchestration boundary.</summary>
     public void ValidateResultV5(RealParserResult? result, SearchLanguage selectedLanguage)
+        => ValidateLanguageResult(result, selectedLanguage, false);
+
+    public void ValidateResultV6(RealParserResult? result, SearchLanguage language)
+        => ValidateLanguageResult(result, language, true);
+
+    private void ValidateLanguageResult(RealParserResult? result, SearchLanguage selectedLanguage, bool actorV6)
     {
         if (selectedLanguage is not (SearchLanguage.English or SearchLanguage.Serbian) || result is null) Invalid();
         switch (result.LanguageCheck)
         {
             case "match":
-                ValidateResult(result);
+                ValidateResultCore(result, actorV6);
                 return;
             case "mismatch" when result.Type == "alert" && result.Query is null && result.AlertCode == "LANGUAGE_MISMATCH":
             case "unclear" when result.Type == "alert" && result.Query is null && result.AlertCode == "QUERY_UNCLEAR":
@@ -208,7 +256,65 @@ public sealed class RealParsedQueryValidator
         }
     }
 
-    public static bool HasActiveFilter(RealHardFilters f) => f.YearMin is not null || f.YearMax is not null || f.RuntimeMin is not null || f.RuntimeMax is not null || f.Genres is not null || f.RatingMin is not null || f.OriginalLanguage is not null;
+    public static bool HasActiveFilter(RealHardFilters f) => f.YearMin is not null || f.YearMax is not null || f.RuntimeMin is not null || f.RuntimeMax is not null || f.Genres is not null || f.RatingMin is not null || f.OriginalLanguage is not null || f.Actors is not null;
+
+    private static (string? Status, RealActorFilter? Value, bool Unsupported) ReadActors(JsonElement value)
+    {
+        var fields = ReadFields(value, "status", "all", "any", "exclude");
+        RequireOnly(fields, "status", "all", "any", "exclude");
+        var status = ReadStatus(fields);
+        var all = ReadActorList(Required(fields, "all"));
+        var any = ReadActorList(Required(fields, "any"));
+        var exclude = ReadActorList(Required(fields, "exclude"));
+        var active = all.Count + any.Count + exclude.Count > 0;
+        ValidateStatus(status, active);
+        return (status, active ? new RealActorFilter(all.Count == 0 ? null : all, any.Count == 0 ? null : any, exclude.Count == 0 ? null : exclude) : null, status == "unsupported");
+    }
+
+    private static IReadOnlyList<string> ReadActorList(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array) Invalid();
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) Invalid();
+            var name = item.GetString()!;
+            if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl) || !seen.Add(name)) Invalid();
+            result.Add(name);
+        }
+        return result;
+    }
+
+    private RealActorFilter? ResolveActors(RealActorFilter proposed)
+    {
+        var unresolved = false;
+        IReadOnlyList<string>? ResolveGroup(IReadOnlyList<string>? group)
+        {
+            if (group is null) return null;
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var name in group)
+            {
+                var resolved = actorResolver!.Resolve(name);
+                if (resolved is null) unresolved = true;
+                else
+                {
+                    // Distinct provider proposals for the same person are malformed duplicates.
+                    if (!seen.Add(resolved)) Invalid();
+                    names.Add(resolved);
+                }
+            }
+            return names.AsReadOnly();
+        }
+        var all = ResolveGroup(proposed.All);
+        var any = ResolveGroup(proposed.Any);
+        var exclude = ResolveGroup(proposed.Exclude);
+        if (unresolved) return null;
+        var excluded = new HashSet<string>(exclude ?? [], StringComparer.Ordinal);
+        if ((all?.Any(excluded.Contains) ?? false) || (any is not null && any.All(excluded.Contains))) return null;
+        return new RealActorFilter(all, any, exclude);
+    }
 
     private static (string Status, int? Min, int? Max, bool Unsupported) ReadBounds(JsonElement value, string minName, string maxName, int minimum, int maximum)
     {
