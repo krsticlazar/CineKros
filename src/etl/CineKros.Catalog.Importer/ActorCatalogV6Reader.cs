@@ -6,7 +6,12 @@ using System.Text.Json;
 
 namespace CineKros.Catalog.Importer;
 
-public sealed record ActorMovieV6(long MovieLensId, string SemanticText, string SemanticTextSr);
+public sealed record ActorMovieV6(long MovieLensId, string SemanticText, string SemanticTextSr)
+{
+    // Additive V6 projection. Ratings retain their original JSON numeric lexeme.
+    public MovieRow? Metadata { get; init; }
+    public IReadOnlyList<string>? Cast { get; init; }
+}
 public sealed record ActorCatalogV6Document(string CatalogPath, string CatalogSha256, string SourceCatalogSha256,
     string SourceContentFingerprint, string DictionarySha256, string SelectionIdSetSha256, string EnCorpusSha256,
     string SrCorpusSha256, string IdentitySha256, string ActorVocabularySha256, string OrderedCastMappingSha256,
@@ -94,7 +99,13 @@ public static class ActorCatalogV6Reader
             if (!ActorCatalogV6.Equal(row.GetProperty("cast"), JsonSerializer.SerializeToElement(cast, Options))) throw new InvalidDataException("V6 independent cast mapping mismatch.");
             foreach (var name in cast ?? []) names.Add(name);
             Append(mapping, new { movieLensId = id, cast }); Append(en, new { movieLensId = id, semanticText = enText }); Append(sr, new { movieLensId = id, semanticText = srText });
-            ids.Append(id.ToString(CultureInfo.InvariantCulture)).Append('\n'); movies.Add(new(id, enText, srText));
+            var metadata = new MovieRow(id, row.GetProperty("imdbId").GetString()!, NullableLong(row, "tmdbId"),
+                title!, row.GetProperty("year").GetInt32(), NullableInt(row, "runtimeMinutes"), row.GetProperty("originalLanguage").GetString(),
+                row.GetProperty("genres").ValueKind == JsonValueKind.Null ? null : Array.AsReadOnly(row.GetProperty("genres").EnumerateArray().Select(x => x.GetString()!).ToArray()),
+                row.GetProperty("averageRating").ValueKind == JsonValueKind.Null ? null : row.GetProperty("averageRating").GetRawText(),
+                NullableLong(row, "ratingCount"), row.GetProperty("posterPath").GetString());
+            ids.Append(id.ToString(CultureInfo.InvariantCulture)).Append('\n'); movies.Add(new(id, enText, srText)
+            { Metadata = metadata, Cast = cast is null ? null : Array.AsReadOnly(cast.ToArray()) });
         }
         var idsHash = Hash(Encoding.UTF8.GetBytes(ids.ToString())); var enHash = Hash(en.ToArray()); var srHash = Hash(sr.ToArray()); var mappingHash = Hash(mapping.ToArray());
         Check(payload, "orderedIdSha256", idsHash); Check(payload, "enCorpusSha256", enHash); Check(payload, "srCorpusSha256", srHash); Check(payload, "orderedCastMappingSha256", mappingHash);
@@ -116,4 +127,6 @@ public static class ActorCatalogV6Reader
     }
     private static void Append<T>(Stream stream, T value) { stream.Write(JsonSerializer.SerializeToUtf8Bytes(value, Options)); stream.WriteByte(10); }
     private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
+    private static long? NullableLong(JsonElement row, string name) => row.GetProperty(name).ValueKind == JsonValueKind.Null ? null : row.GetProperty(name).GetInt64();
+    private static int? NullableInt(JsonElement row, string name) => row.GetProperty(name).ValueKind == JsonValueKind.Null ? null : row.GetProperty(name).GetInt32();
 }

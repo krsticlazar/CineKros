@@ -1,5 +1,8 @@
 using CineKros.VectorImporter;
 
+if (args.Length > 0 && args[0] is "--paired-actor-v6" or "--capture-actor-v6-baseline")
+    return await ActorImportCommandV6.RunAsync(args);
+
 if (args.Length > 0 && args[0] == "--paired-poc")
 {
     if (args.Length != 13 || args[1] != "--catalog" || args[3] != "--manifest" || args[5] != "--dictionary" || args[7] != "--source-catalog" || args[9] != "--en" || args[11] != "--sr")
