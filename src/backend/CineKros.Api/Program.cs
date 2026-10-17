@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 var recommendationMode = RecommendationStartup.ResolveMode(builder.Environment);
 var serbianPocMode = RecommendationStartup.ResolveSerbianPocMode(builder.Environment, recommendationMode);
 RecommendationStartup.RegisterServices(builder.Services, recommendationMode, serbianPocMode, builder.Environment);
+builder.Services.AddSingleton<StartupReadinessState>();
 ProductionHttpConfiguration.AddRecommendationCors(builder.Services, builder.Configuration, builder.Environment);
 var trustedClientIp = TrustedClientIp.Parse(builder.Configuration);
 builder.Services.AddRateLimiter(options =>
@@ -25,9 +26,14 @@ if (recommendationMode == "real")
 {
     _ = app.Services.GetRequiredService<E5EmbeddingModel>();
     await app.Services.GetRequiredService<MovieSearchRepository>().EnsureRuntimeReadyAsync();
+    app.Services.GetRequiredService<StartupReadinessState>().MarkReady();
 }
 app.UseCors(ProductionHttpConfiguration.RecommendationCorsPolicy);
 app.UseRateLimiter();
+app.MapGet("/live", () => Results.Ok(new { status = "live" }));
+app.MapGet("/ready", (StartupReadinessState state) => state.IsReady
+    ? Results.Ok(new { status = "ready" })
+    : Results.Json(new { status = "not_ready" }, statusCode: StatusCodes.Status503ServiceUnavailable));
 if (recommendationMode == "real")
     app.MapPost("/api/recommendations", RealRecommendationEndpoint.HandleAsync).RequireRateLimiting("recommendations");
 else
