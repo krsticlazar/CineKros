@@ -1,0 +1,63 @@
+# Build only the API and its three declared project references.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.401-noble AS build
+WORKDIR /src
+
+COPY global.json Directory.Build.props ./
+COPY src/backend/CineKros.Api/CineKros.Api.csproj src/backend/CineKros.Api/packages.lock.json src/backend/CineKros.Api/
+COPY src/embedding/CineKros.Embedding/CineKros.Embedding.csproj src/embedding/CineKros.Embedding/packages.lock.json src/embedding/CineKros.Embedding/
+COPY src/etl/CineKros.Catalog.Importer/CineKros.Catalog.Importer.csproj src/etl/CineKros.Catalog.Importer/packages.lock.json src/etl/CineKros.Catalog.Importer/
+COPY src/shared/CineKros.TextNormalization/CineKros.TextNormalization.csproj src/shared/CineKros.TextNormalization/
+COPY deploy/locks/api/packages.lock.json src/backend/CineKros.Api/packages.lock.json
+COPY deploy/locks/embedding/packages.lock.json src/embedding/CineKros.Embedding/packages.lock.json
+COPY deploy/locks/importer/packages.lock.json src/etl/CineKros.Catalog.Importer/packages.lock.json
+
+RUN dotnet restore src/backend/CineKros.Api/CineKros.Api.csproj --runtime linux-x64 --locked-mode
+
+COPY src/backend/CineKros.Api/ src/backend/CineKros.Api/
+COPY src/embedding/CineKros.Embedding/ src/embedding/CineKros.Embedding/
+COPY src/etl/CineKros.Catalog.Importer/ src/etl/CineKros.Catalog.Importer/
+COPY src/shared/CineKros.TextNormalization/ src/shared/CineKros.TextNormalization/
+
+RUN dotnet publish src/backend/CineKros.Api/CineKros.Api.csproj \
+    --configuration Release \
+    --runtime linux-x64 \
+    --self-contained false \
+    --no-restore \
+    -p:UseAppHost=false \
+    -p:PublishReadyToRun=false \
+    -p:EnableDefaultContentItems=false \
+    --output /out
+
+# Linux Web SDK otherwise implicitly includes schemas already explicitly listed
+# in the unchanged API project. Preserve the ordinary settings separately.
+RUN cp src/backend/CineKros.Api/appsettings.json /out/appsettings.json \
+    && cp src/backend/CineKros.Api/appsettings.Development.json /out/appsettings.Development.json
+
+# Microsoft does not publish .NET 10 Debian container images. Use the supported
+# Debian 13 Microsoft package feed so the final image remains glibc-based.
+FROM debian:trixie-slim AS runtime
+ENV ASPNETCORE_HTTP_PORTS=8080 \
+    DOTNET_EnableDiagnostics=0 \
+    CINEKROS_E5_MODEL_DIR=/models
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates curl wget \
+    && wget --quiet https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb \
+    && dpkg -i /tmp/packages-microsoft-prod.deb \
+    && rm /tmp/packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes aspnetcore-runtime-10.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 cinekros \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin cinekros
+
+COPY --from=build --chown=10001:10001 /out/ ./
+COPY --chmod=0555 deploy/start-api.sh /usr/local/bin/start-api
+USER 10001:10001
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD curl --fail --silent --show-error http://127.0.0.1:8080/live || exit 1
+ENTRYPOINT ["/usr/local/bin/start-api"]
+CMD ["CineKros.Api.dll"]

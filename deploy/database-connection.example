@@ -1,0 +1,1 @@
+Host=postgres;Port=5432;Database=cinekros;Username=cinekrosreadonly;Password=REPLACE_WITH_EXTERNAL_READONLY_ROLE_PASSWORD

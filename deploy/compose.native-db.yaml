@@ -1,0 +1,6 @@
+# Optional host-local PostgreSQL access for the native systemd API variant.
+# Use with `up postgres` only; the API and public tunnel stay containerized/off.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
