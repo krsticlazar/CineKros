@@ -190,14 +190,18 @@ Prvo identifikovati postojeći PG container i nalog preko lokalnih uputstava. Lo
 ```powershell
 $pgContainer='<STVARNI_POSTOJECI_PG_CONTAINER>'
 $dumpName='cinekros-v6-<JEDINSTVEN_TIMESTAMP>.dump'
-docker exec $pgContainer pg_dump -U <POSTOJECI_BACKUP_NALOG> -d cinekros_v6_rehearsal_20261015t2154z_4fd266aa -Fc --no-owner --no-acl -f /tmp/$dumpName
+$dockerCli='C:\Program Files\Docker\Docker\resources\bin\docker.exe'
+if (-not (Test-Path -LiteralPath $dockerCli)) { throw 'Prvo pronadji stvarni Docker CLI.' }
+& $dockerCli exec $pgContainer pg_dump -U <POSTOJECI_BACKUP_NALOG> -d cinekros_v6_rehearsal_20261015t2154z_4fd266aa -Fc --no-owner --no-acl -f /tmp/$dumpName
 # Proveriti prethodni exit code pre nastavka.
-docker cp "${pgContainer}:/tmp/$dumpName" ".local/deployment/transfer/$dumpName"
+& $dockerCli cp "${pgContainer}:/tmp/$dumpName" ".local/deployment/transfer/$dumpName"
 Get-FileHash ".local/deployment/transfer/$dumpName" -Algorithm SHA256
 scp ".local/deployment/transfer/$dumpName" <SERVER_SSH_HOST>:/putanja/za/privremeni/prijem/
 ```
 
 Koristiti pg_dump 17 prema serveru 17. Ne prepisivati raniji backup. Proveriti checksum prenetog dump-a i sadržaj `pg_restore --list` pre restore-a. Dump obuhvata V6 šemu, cast i vektore; nema potrebe za novim ETL-om/importom/migracijama.
+
+Na ovoj Windows mašini proverena je gornja puna `docker.exe` putanja. Golo `docker` u agentskoj PowerShell sesiji pogodilo je zero-byte stub u system32 i nije davalo stvarni rezultat. Zato pre backup-a proveriti pravi CLI sa `& $dockerCli version`; prazna konzola/exit 0 nije dokaz uspešnog dump-a. Ovo nije razlog za menjanje postojećeg lokalnog launchera ili sistemskih fajlova.
 
 ### Compose podešavanje pre prve inicijalizacije server baze
 
@@ -565,11 +569,26 @@ Ne otvaraju se ponovo izbor modela, dimenzionalnost, lokalni inference, PG/pgvec
 
 | Celina / fajlovi | Razlog / dokaz | Lokalni commit | Uticaj na Development |
 |---|---|---|---|
-| `Program.cs`, `Startup/TrustedClientIp.cs`, odgovarajući test | Ograničen CF header limiter ključ, default OFF, exact peer; 33 ciljane provere | `9664914` | Bez konfiguracije ključ ostaje postojeći RemoteIpAddress; limit 30/60 isti |
-| `Program.cs`, `Startup/StartupReadinessState.cs`, health test | `/live`, cached `/ready`; 36 ciljane provere zajedno sa prethodnim grupama | `b964f45` | Novi izolovani health put; fake ostaje not-ready, real posle originalnog preflight-a |
-| `RecommendationStartup.cs`, `SearchDatasetExpectation.cs`, factory u `MovieSearchRepository.cs`, V6/CORS testovi | Novi eksplicitni Production profil; isti V6 pinovi osim ciljnog imena baze; punycode test | `c515ec1` | Stari `actor-v6-isolated` i V5 podrazumevana kompatibilnost ostaju |
+| `src/backend/CineKros.Api/Program.cs`, `src/backend/CineKros.Api/Startup/TrustedClientIp.cs`, `tests/CineKros.Api.Tests/Startup/TrustedClientIpTests.cs` | Ograničen CF header limiter ključ, default OFF, exact peer; 33 ciljane provere | `9664914` | Bez konfiguracije ključ ostaje postojeći RemoteIpAddress; limit 30/60 isti |
+| `src/backend/CineKros.Api/Program.cs`, `src/backend/CineKros.Api/Startup/StartupReadinessState.cs`, `tests/CineKros.Api.Tests/Startup/HealthEndpointTests.cs` | `/live`, cached `/ready`; 36 ciljane provere zajedno sa prethodnim grupama | `b964f45` | Novi izolovani health put; fake ostaje not-ready, real posle originalnog preflight-a |
+| `src/backend/CineKros.Api/Startup/RecommendationStartup.cs`, `src/backend/CineKros.Api/Search/SearchDatasetExpectation.cs`, factory u `src/backend/CineKros.Api/Search/MovieSearchRepository.cs`, `tests/CineKros.Api.Tests/Search/V6SearchTests.cs`, `tests/CineKros.Api.Tests/Startup/RecommendationCorsTests.cs` | Novi eksplicitni Production profil; isti V6 pinovi osim ciljnog imena baze; punycode test | `c515ec1` | Stari `actor-v6-isolated` i V5 podrazumevana kompatibilnost ostaju |
 | `deploy/CineKros.DeployCheck/`, novi test projekat i mala query referenca | Ista shared E5 biblioteka; 6 offline testova, Windows export30; Linux FDD publish | `2c88fd0` | Nema API reference/publish zavisnosti na alat |
 | `deploy/` pakovanje, SQL/model manifest, `.dockerignore` i RID lock kopije | Namenski server šabloni, uspešan stvarni Debian image build i izolovane negativne provere; dodatno SQL ne prikriva pogrešan search_path | `a9fffb2`, `63a89a1` | Ne koristi lokalni launcher/loader niti menja source lockove |
+
+Inventar novog deployment paketa (svi pripadaju prethodnoj packaging celini):
+
+- `deploy/Dockerfile.api` — multi-stage build; `deploy/locks/api/packages.lock.json`, `deploy/locks/embedding/packages.lock.json`, `deploy/locks/importer/packages.lock.json` — zasebne Linux RID lock varijante bez promene dependency verzija.
+- `deploy/compose.yaml` — tri servisa/mreže/volume/health; `deploy/compose.native-db.yaml` — samo opcioni host-loopback PG port.
+- `deploy/compose.env.example`, `deploy/api.env.example` — bezbedni konfiguracioni primeri.
+- `deploy/database-connection.example`, `deploy/gemini-api-key.example`, `deploy/postgres-admin-password.example`, `deploy/cloudflared-credentials.example.json` — placeholder/prazni secret primeri, nikada stvarne tajne.
+- `deploy/start-api.sh` — eksplicitan Production V6 guard i učitavanje secret fajlova; `deploy/cinekros-api.service` — native API alternativa, bez Windows zavisnosti.
+- `deploy/cloudflared/config.example.yml` — named tunnel API ingress, bez stvarnog UUID/credentials sadržaja.
+- `deploy/model.SHA256SUMS`, `deploy/verify-model.sh` — zaključan inventar i provera pet assets.
+- `deploy/validate-production-readiness.sql` — samo čitanje obnovljene baze; refiniran commitom `63a89a1`.
+- `.dockerignore`, `deploy/.gitattributes` — minimalni build context i Unix line endings.
+- `deploy/CineKros.DeployCheck/{CineKros.DeployCheck.csproj,Program.cs,AssemblyInfo.cs,packages.lock.json}`, `tests/CineKros.DeployCheck.Tests/{CineKros.DeployCheck.Tests.csproj,DeployCheckTests.cs,packages.lock.json}` i `deploy/reference/windows-e5-reference.json` — samostalna alatka/testovi/ref, commit `2c88fd0`.
+
+Glavni dokument uveden je commitom `dd52e9e`; kasnija dokumentaciona dopuna pojašnjava provereni Windows Docker CLI i ovaj inventar. Tačan konačni dokumentacioni commit vidi se komandom `git log -1 -- docs/deployment/DEPLOYMENT_PLAN.md`, bez promene istorije ili push-a.
 
 Ukupna backend regresija: **233 passed / 22 expected skipped / 0 failed** (255 slučajeva). Preskočene su opt-in DB/provider provere; nisu predstavljene kao nova integraciona/live potvrda. Frontend: **55/55 passed** i production build. API i tool **linux-x64 framework-dependent publish** uspešni. Windows referenca: 30 x 768D, konačne vrednosti, norme i SR script token identičnost provereni; server compare nije izvršen. Lokalni V6 DB runtime nije ponovo startovan radi ove pripreme i nema novih Gemini poziva.
 
