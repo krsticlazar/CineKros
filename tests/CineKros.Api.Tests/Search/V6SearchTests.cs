@@ -71,7 +71,10 @@ public sealed class V6SearchTests
         Assert.AreEqual("v5", RecommendationStartup.ResolveRuntimeProfile(dev, "real", false, null));
         Assert.AreEqual("v5", RecommendationStartup.ResolveRuntimeProfile(prod, "real", false, "v5"));
         Assert.AreEqual("actor-v6-isolated", RecommendationStartup.ResolveRuntimeProfile(dev, "real", false, "actor-v6-isolated"));
+        Assert.AreEqual("actor-v6-production", RecommendationStartup.ResolveRuntimeProfile(prod, "real", false, "actor-v6-production"));
         foreach (var input in new[] { (dev, "fake", false, "actor-v6-isolated"), (dev, "real", true, "actor-v6-isolated"), (prod, "real", false, "actor-v6-isolated"), (dev, "real", false, "ActorV6"), (dev, "real", false, "") })
+            Assert.ThrowsExactly<InvalidOperationException>(() => RecommendationStartup.ResolveRuntimeProfile(input.Item1, input.Item2, input.Item3, input.Item4));
+        foreach (var input in new[] { (dev, "fake", false, "actor-v6-production"), (dev, "real", false, "actor-v6-production"), (prod, "fake", false, "actor-v6-production"), (prod, "real", true, "actor-v6-production") })
             Assert.ThrowsExactly<InvalidOperationException>(() => RecommendationStartup.ResolveRuntimeProfile(input.Item1, input.Item2, input.Item3, input.Item4));
         var e = V6SearchDatasetExpectation.Isolated(V6SearchDatasetExpectation.Database);
         Assert.AreEqual("CineKros-bilingual-actor-catalog-v6", e.CatalogVersion);
@@ -81,6 +84,10 @@ public sealed class V6SearchTests
         Assert.AreNotEqual(SearchDatasetExpectation.FullBilingualProduction("cinekros").CatalogIdentity, e.CatalogIdentity);
         foreach (var db in new[] { "cinekros", "cinekros_v6_test_p4_unreleased", V6SearchDatasetExpectation.Database + "\n", "cinekros_sr_poc_phase06t_v2_20261009" })
             Assert.ThrowsExactly<InvalidOperationException>(() => V6SearchDatasetExpectation.Isolated(db));
+        var production = V6SearchDatasetExpectation.Production("cinekros");
+        Assert.AreEqual(e with { DatabaseName = "cinekros" }, production);
+        foreach (var db in new[] { V6SearchDatasetExpectation.Database, "cinekros_v6_test_p4_unreleased", "cinekros_sr_poc_phase06t_v2_20261009", "cinekros\n" })
+            Assert.ThrowsExactly<InvalidOperationException>(() => V6SearchDatasetExpectation.Production(db));
     }
 
     [TestMethod]

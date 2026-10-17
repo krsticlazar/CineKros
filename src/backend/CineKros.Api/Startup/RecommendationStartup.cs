@@ -34,21 +34,34 @@ public static class RecommendationStartup
     public static void RegisterServices(IServiceCollection services, string mode, bool serbianPoc, IHostEnvironment environment)
     {
         var profile = ResolveRuntimeProfile(environment, mode, serbianPoc, Environment.GetEnvironmentVariable("CINEKROS_RUNTIME_PROFILE"));
-        var actorV6 = profile == "actor-v6-isolated";
-        var trace = DevelopmentSqlTrace.ResolveEnabled(environment.IsDevelopment(), actorV6,
+        var actorV6 = profile is "actor-v6-isolated" or "actor-v6-production";
+        var actorV6Production = profile == "actor-v6-production";
+        var trace = actorV6Production ? false : DevelopmentSqlTrace.ResolveEnabled(environment.IsDevelopment(), actorV6,
             Environment.GetEnvironmentVariable("CINEKROS_V6_SQL_DIAGNOSTICS"));
-        RegisterServicesCore(services, mode, serbianPoc, actorV6, trace);
+        RegisterServicesCore(services, mode, serbianPoc, actorV6, actorV6Production, trace);
     }
 
     public static string ResolveRuntimeProfile(IHostEnvironment environment, string mode, bool serbianPoc, string? profile)
     {
         if (profile is null or "v5") return "v5";
-        if (profile != "actor-v6-isolated" || !environment.IsDevelopment() || mode != "real" || serbianPoc)
+        if (profile == "actor-v6-isolated")
+        {
+            if (environment.IsDevelopment() && mode == "real" && !serbianPoc) return profile;
             throw new InvalidOperationException("The isolated V6 runtime requires real Development mode without Serbian POC mode.");
-        return profile;
+        }
+        if (profile == "actor-v6-production")
+        {
+            if (environment.IsProduction() && mode == "real" && !serbianPoc) return profile;
+            throw new InvalidOperationException("The production V6 runtime requires real Production mode without Serbian POC mode.");
+        }
+        else
+            throw new InvalidOperationException("The selected V6 runtime profile is not permitted for this environment, recommendation mode, or POC mode.");
     }
 
     private static void RegisterServicesCore(IServiceCollection services, string mode, bool serbianPoc, bool actorV6, bool sqlDiagnostics)
+        => RegisterServicesCore(services, mode, serbianPoc, actorV6, actorV6Production: false, sqlDiagnostics);
+
+    private static void RegisterServicesCore(IServiceCollection services, string mode, bool serbianPoc, bool actorV6, bool actorV6Production, bool sqlDiagnostics)
     {
         if (serbianPoc && mode != "real")
             throw new InvalidOperationException("CINEKROS_SERBIAN_POC=true requires real recommendation mode.");
@@ -60,7 +73,7 @@ public static class RecommendationStartup
             return;
         }
 
-        RegisterRealServices(services, serbianPoc, actorV6, sqlDiagnostics);
+        RegisterRealServices(services, serbianPoc, actorV6, actorV6Production, sqlDiagnostics);
     }
 
     public static bool ResolveSerbianPocMode(IHostEnvironment environment, string mode) =>
@@ -95,7 +108,7 @@ public static class RecommendationStartup
         return builder.ConnectionString;
     }
 
-    private static void RegisterRealServices(IServiceCollection services, bool serbianPoc, bool actorV6, bool sqlDiagnostics)
+    private static void RegisterRealServices(IServiceCollection services, bool serbianPoc, bool actorV6, bool actorV6Production, bool sqlDiagnostics)
     {
         var connectionString = Environment.GetEnvironmentVariable("DATABASE_CONNECTION_STRING");
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
@@ -103,7 +116,7 @@ public static class RecommendationStartup
         if (string.IsNullOrWhiteSpace(connectionString) || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(modelDirectory))
             throw new InvalidOperationException("Real recommendation mode requires DATABASE_CONNECTION_STRING, GEMINI_API_KEY, and CINEKROS_E5_MODEL_DIR in the process environment.");
         connectionString = CreateReadOnlyConnectionString(connectionString,
-            actorV6 ? V6SearchDatasetExpectation.Database : serbianPoc ? SearchDatasetExpectation.CorrectedV2Database : SearchDatasetExpectation.FullProductionDatabase);
+            actorV6Production ? SearchDatasetExpectation.FullProductionDatabase : actorV6 ? V6SearchDatasetExpectation.Database : serbianPoc ? SearchDatasetExpectation.CorrectedV2Database : SearchDatasetExpectation.FullProductionDatabase);
 
         var artifactDirectory = Path.Combine(AppContext.BaseDirectory, "RealProviders");
         var promptName = actorV6 ? "query-parser-v6.md" : "query-parser-v5.md";
@@ -124,7 +137,9 @@ public static class RecommendationStartup
         services.AddSingleton(sp => LoadE5Model(modelDirectory, embeddingProfile));
         services.AddSingleton<IRealQueryEmbeddingProvider, E5QueryEmbeddingAdapter>();
         services.AddSingleton<NpgsqlDataSource>(_ => MovieSearchRepository.CreateDataSource(connectionString));
-        if (actorV6)
+        if (actorV6Production)
+            services.AddSingleton(sp => MovieSearchRepository.CreateProductionV6RepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());
+        else if (actorV6)
             services.AddSingleton(sp => MovieSearchRepository.CreateIsolatedV6RepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>(), sp.GetRequiredService<DevelopmentSqlTrace>()).GetAwaiter().GetResult());
         else if (serbianPoc)
             services.AddSingleton(sp => MovieSearchRepository.CreateCorrectedPhase6TV2PocRepositoryAsync(sp.GetRequiredService<NpgsqlDataSource>()).GetAwaiter().GetResult());

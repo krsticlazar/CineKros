@@ -114,4 +114,11 @@ public sealed record V6SearchDatasetExpectation
             Actors = new()
         };
     }
+
+    public static SearchDatasetExpectation Production(string actualDatabase)
+    {
+        if (actualDatabase != SearchDatasetExpectation.FullProductionDatabase)
+            throw new InvalidOperationException("V6 production search requires the exact cinekros database.");
+        return Isolated(Database) with { DatabaseName = actualDatabase };
+    }
 }

@@ -75,6 +75,19 @@ public sealed class RecommendationCorsTests
     }
 
     [TestMethod]
+    public async Task CanonicalPunycodeOriginPassesPreflight()
+    {
+        const string origin = "https://cinekros.xn--lazarkrsti-zhb.com";
+        Assert.AreEqual("xn--lazarkrsti-zhb.com", new System.Globalization.IdnMapping().GetAscii("lazarkrstić.com"));
+        await using var factory = CreateFactory(origin);
+        using var client = factory.CreateClient();
+        using var response = await Preflight(client, origin, "POST", "content-type");
+
+        Assert.AreEqual(System.Net.HttpStatusCode.NoContent, response.StatusCode);
+        Assert.AreEqual(origin, response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+    }
+
+    [TestMethod]
     public async Task AllowedOriginReceivesCorsHeaderOnSanitizedPreParserValidationError()
     {
         await using var factory = CreateFactory("https://web.example.com");

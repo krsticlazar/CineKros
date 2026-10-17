@@ -59,6 +59,14 @@ public sealed class MovieSearchRepository
         return repository;
     }
 
+    public static async Task<MovieSearchRepository> CreateProductionV6RepositoryAsync(NpgsqlDataSource dataSource,
+        CancellationToken cancellationToken = default)
+    {
+        var repository = await CreateDatasetRepositoryAsync(dataSource, V6SearchDatasetExpectation.Production, cancellationToken);
+        await repository.EnsureRuntimeReadyAsync(cancellationToken);
+        return repository;
+    }
+
     private static async Task<MovieSearchRepository> CreateDatasetRepositoryAsync(NpgsqlDataSource dataSource,
         Func<string, SearchDatasetExpectation> expectationFactory, CancellationToken cancellationToken)
     {
