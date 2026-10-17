@@ -1,7 +1,7 @@
 -- Read-only preflight for the exact V6 release expected by actor-v6-production.
 -- Connect as the dedicated cinekrosreadonly role to database cinekros.
 BEGIN TRANSACTION READ ONLY;
-SET LOCAL search_path = public, pg_catalog;
+-- Inspect the caller's effective schema; do not force public and hide a bad search_path.
 
 SELECT current_database() = 'cinekros' AS expected_database,
        current_user = 'cinekrosreadonly' AS expected_runtime_role,
@@ -28,13 +28,13 @@ FROM public.movies;
 
 SELECT count(*) AS embedding_rows,
        count(*) = 9730 AS row_count_matches,
-       count(*) FILTER (WHERE vector_dims(embedding) = 768) AS english_768d_rows,
-       count(*) FILTER (WHERE vector_dims(embedding) = 768) = 9730 AS all_english_vectors_768d,
-       count(*) FILTER (WHERE abs(vector_norm(embedding) - 1) <= 0.0001) AS english_unit_norm_rows,
+       count(*) FILTER (WHERE public.vector_dims(embedding) = 768) AS english_768d_rows,
+       count(*) FILTER (WHERE public.vector_dims(embedding) = 768) = 9730 AS all_english_vectors_768d,
+       count(*) FILTER (WHERE abs(public.vector_norm(embedding) - 1) <= 0.0001) AS english_unit_norm_rows,
        count(*) FILTER (WHERE embedding_sr IS NOT NULL) AS serbian_rows,
-       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND vector_dims(embedding_sr) = 768) AS serbian_768d_rows,
-       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND vector_dims(embedding_sr) = 768) = 9730 AS all_serbian_vectors_768d,
-       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND abs(vector_norm(embedding_sr) - 1) <= 0.0001) AS serbian_unit_norm_rows
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND public.vector_dims(embedding_sr) = 768) AS serbian_768d_rows,
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND public.vector_dims(embedding_sr) = 768) = 9730 AS all_serbian_vectors_768d,
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND abs(public.vector_norm(embedding_sr) - 1) <= 0.0001) AS serbian_unit_norm_rows
 FROM public.movie_embeddings;
 
 SELECT count(*) = 1
