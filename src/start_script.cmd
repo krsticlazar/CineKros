@@ -1,128 +1,42 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
-
-for %%I in ("%~dp0..") do set "REPO_DIR=%%~fI"
+setlocal EnableExtensions
 set "STARTUP_DIR=%~dp0"
-set "SERVER_DIR=%REPO_DIR%\src\backend\CineKros.Api"
-set "CLIENT_DIR=%REPO_DIR%\src\frontend"
-set "COMPOSE_FILE=%REPO_DIR%\database\docker\compose.yaml"
+set "LAUNCHER_PATH=%~f0"
+set "START_OPTIONS="
+set "START_INTERACTIVE=1"
+title CineKros - Startup
+:options
+if "%~1"=="" goto launch
+if /i "%~1"=="--bootstrap-ready" goto bootstrap
+if /i "%~1"=="--v5" (set "START_OPTIONS=%START_OPTIONS% -V5") else if /i "%~1"=="--headless" (set "START_OPTIONS=%START_OPTIONS% -Headless" & set "START_INTERACTIVE=0") else if /i "%~1"=="--stop" (set "START_OPTIONS=%START_OPTIONS% -Stop" & set "START_INTERACTIVE=0") else (
+  echo GRESKA: Nepoznata opcija. Koristi --v5, --headless ili --stop.
+  exit /b 1
+)
+shift
+goto options
+:launch
 set "PATH=%ProgramFiles%\dotnet;%ProgramFiles%\nodejs;%PATH%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%STARTUP_DIR%load-startup-env.ps1" -LauncherPath "%LAUNCHER_PATH%" %START_OPTIONS%
+set "START_EXIT=%errorlevel%"
+if not "%START_EXIT%"=="0" if "%START_INTERACTIVE%"=="1" pause
+exit /b %START_EXIT%
 
-if /i not "%~1"=="--bootstrap-ready" (
-  set "STARTUP_HEADLESS=false"
-  if /i "%~1"=="--headless" set "STARTUP_HEADLESS=true"
-  if /i "%~1"=="--headless" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%\src\load-startup-env.ps1" -LauncherPath "%~f0" -Headless
-  ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%\src\load-startup-env.ps1" -LauncherPath "%~f0"
-  )
-  exit /b !errorlevel!
-)
-
-rem Docker Desktop is started only through its explicit executable path.
-docker.exe info >nul 2>&1
-if not errorlevel 1 goto docker_ready
-
-if not exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" (
-  echo GRESKA: Docker CLI engine nije dostupan, a eksplicitna Docker Desktop putanja ne postoji.
-  pause
-  exit /b 1
-)
-start "" "%ProgramFiles%\Docker\Docker\Docker Desktop.exe"
-
-for /l %%I in (1,1,60) do (
-  docker.exe info >nul 2>&1
-  if not errorlevel 1 goto docker_ready
-  timeout /t 2 /nobreak >nul
-)
-
-echo GRESKA: Docker engine nije postao dostupan u roku od 120 sekundi.
-pause
-exit /b 1
-
-:docker_ready
-if not defined CINEKROS_POSTGRES_PASSWORD (
-  echo GRESKA: Nedostaje procesna promenljiva CINEKROS_POSTGRES_PASSWORD.
-  pause
-  exit /b 1
-)
-
-docker.exe compose -f "%COMPOSE_FILE%" up -d cinekros-postgres
-if errorlevel 1 (
-  echo GRESKA: PostgreSQL Compose servis nije mogao da se pokrene.
-  pause
-  exit /b 1
-)
-
-for /l %%I in (1,1,45) do (
-  for /f "delims=" %%H in ('docker.exe inspect --format "{{.State.Health.Status}}" cinekros-postgres 2^>nul') do if /i "%%H"=="healthy" goto database_ready
-  timeout /t 2 /nobreak >nul
-)
-
-echo GRESKA: PostgreSQL nije postao zdrav u roku od 90 sekundi.
-pause
-exit /b 1
-
-:database_ready
-if not defined CINEKROS_RECOMMENDATION_MODE set "CINEKROS_RECOMMENDATION_MODE=real"
-set "CINEKROS_SERBIAN_POC=false"
-if /i "%CINEKROS_RECOMMENDATION_MODE%"=="fake" (
-  echo Rezim preporuka: Development fake ^(bez Gemini parsera i realne pretrage^).
-) else if /i "%CINEKROS_RECOMMENDATION_MODE%"=="real" (
-  if not defined DATABASE_CONNECTION_STRING (
-    echo GRESKA: Nedostaje procesna promenljiva DATABASE_CONNECTION_STRING.
-    pause
-    exit /b 1
-  )
-  if not defined GEMINI_API_KEY (
-    echo GRESKA: Nedostaje procesna promenljiva GEMINI_API_KEY.
-    pause
-    exit /b 1
-  )
-  if not defined CINEKROS_E5_MODEL_DIR set "CINEKROS_E5_MODEL_DIR=%REPO_DIR%\database\data\models\multilingual-e5-base\d128750597153bb5987e10b1c3493a34e5a4502a"
-  if not exist "%CINEKROS_E5_MODEL_DIR%\model_qint8_avx512_vnni.onnx" (
-    echo GRESKA: Nije pronadjen lokalni E5 model na CINEKROS_E5_MODEL_DIR.
-    pause
-    exit /b 1
-  )
-  echo Rezim preporuka: real, kompletan visejezicki katalog cinekros ^(9730 filmova^).
-) else (
-  echo GRESKA: CINEKROS_RECOMMENDATION_MODE mora biti fake ili real.
-  pause
-  exit /b 1
-)
-
-if /i "%CINEKROS_STARTUP_HEADLESS%"=="true" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%STARTUP_DIR%start-headless-runtime.ps1"
-  exit /b !errorlevel!
-)
-
-start "CineKros Backend" cmd /k "cd /d ""%SERVER_DIR%"" && set ""ASPNETCORE_ENVIRONMENT=Development"" && dotnet run --launch-profile CineKros.Api"
-
-for /l %%I in (1,1,60) do (
-  powershell -NoProfile -Command "$c=New-Object Net.Sockets.TcpClient; try {$c.Connect('127.0.0.1',5179); $c.Close(); exit 0} catch {exit 1}"
-  if not errorlevel 1 goto backend_ready
-  timeout /t 1 /nobreak >nul
-)
-
-echo.
-echo GRESKA: Backend nije postao dostupan u roku od 60 sekundi.
-pause
-exit /b 1
-
-:backend_ready
-start "CineKros Frontend" cmd /k "cd /d ""%CLIENT_DIR%"" && npm run dev"
-
-for /l %%I in (1,1,60) do (
-  powershell -NoProfile -Command "try { Invoke-WebRequest 'http://localhost:5173' -UseBasicParsing -TimeoutSec 1 | Out-Null; exit 0 } catch { exit 1 }"
-  if not errorlevel 1 (
-    start "" "http://localhost:5173"
-    exit /b 0
-  )
-  timeout /t 1 /nobreak >nul
-)
-
-echo.
-echo GRESKA: Frontend nije postao dostupan u roku od 60 sekundi.
-pause
-exit /b 1
+:bootstrap
+for %%I in ("%STARTUP_DIR%..") do set "REPO_DIR=%%~fI"
+if /i not "%CINEKROS_RUNTIME_PROFILE%"=="actor-v6-isolated" if /i not "%CINEKROS_RUNTIME_PROFILE%"=="v5" (echo GRESKA: Neispravan runtime profil.& exit /b 1)
+set "BACKEND_DIR=%REPO_DIR%\src\backend\CineKros.Api"
+set "FRONTEND_DIR=%REPO_DIR%\src\frontend"
+set "BACKEND_DLL=%BACKEND_DIR%\bin\Debug\net10.0\CineKros.Api.dll"
+set "BACKEND_PORT=5186"
+set "START_VERSION=V6"
+if /i "%CINEKROS_RUNTIME_PROFILE%"=="v5" (set "BACKEND_PORT=5179" & set "START_VERSION=V5")
+set "CINEKROS_BACKEND_PORT=%BACKEND_PORT%"
+start "CineKros %START_VERSION% - Backend" /D "%REPO_DIR%" cmd.exe /d /k dotnet "%BACKEND_DLL%" --urls "http://127.0.0.1:%BACKEND_PORT%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$end=(Get-Date).AddSeconds(180); do { $c=[Net.Sockets.TcpClient]::new(); try { $a=$c.BeginConnect('127.0.0.1',[int]$env:CINEKROS_BACKEND_PORT,$null,$null); if($a.AsyncWaitHandle.WaitOne(500)){ $c.EndConnect($a); exit 0 } } catch {} finally { $c.Dispose() }; Start-Sleep -Milliseconds 250 } while((Get-Date)-lt $end); exit 1"
+if errorlevel 1 (echo GRESKA: Backend nije postao spreman; proveri njegovu konzolu.& exit /b 1)
+start "CineKros %START_VERSION% - Frontend" /D "%FRONTEND_DIR%" cmd.exe /d /k node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$end=(Get-Date).AddSeconds(60); do { try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){ exit 0 } } catch {}; Start-Sleep -Milliseconds 250 } while((Get-Date)-lt $end); exit 1"
+if errorlevel 1 (echo GRESKA: Frontend nije vratio HTTP 200; proveri njegovu konzolu.& exit /b 1)
+start "" "http://127.0.0.1:5173/"
+echo CineKros V6 je spreman. Servisne konzole su nezavisne; zatvori ih rucno ili pritisni CTRL+C u svakoj za gasenje.
+exit /b 0

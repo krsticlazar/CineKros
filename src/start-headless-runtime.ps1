@@ -1,8 +1,11 @@
+param([switch] $Headless, [switch] $Stop)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendDir = Join-Path $repoRoot 'src\backend\CineKros.Api'
 $frontendDir = Join-Path $repoRoot 'src\frontend'
 $reportRoot = Join-Path $repoRoot '.local\runtime'
+$activePath = Join-Path $reportRoot 'active-run.json'
+$backendPort = if ($env:CINEKROS_RUNTIME_PROFILE -eq 'actor-v6-isolated') { 5186 } else { 5179 }
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $runDir = Join-Path $reportRoot $runId
 $manifestPath = Join-Path $runDir 'owned-processes.json'
@@ -32,7 +35,7 @@ function Save-Manifest {
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 }
 
-function Test-DescendantOfLauncher($ProcessRecord, $Launcher) {
+function Test-DescendantOfLauncher($ProcessRecord, $Launcher, $Snapshot = $null) {
     if ($null -eq $ProcessRecord) { return $false }
     $current = $ProcessRecord
     $seen = [System.Collections.Generic.HashSet[int]]::new()
@@ -43,9 +46,10 @@ function Test-DescendantOfLauncher($ProcessRecord, $Launcher) {
             $createdUtc = Convert-CreationUtc $current.CreationDate
             if ($createdUtc -ne $Launcher.createdUtc) { return $false }
             if ($current.ExecutablePath -ne $Launcher.executablePath) { return $false }
+            if ((Protect-LogText ([string]$current.CommandLine)) -ne $Launcher.commandLine) { return $false }
             return $true
         }
-        $parent = Get-CimProcess ([int]$current.ParentProcessId)
+        $parent = if ($null -ne $Snapshot) { $Snapshot[[int]$current.ParentProcessId] } else { Get-CimProcess ([int]$current.ParentProcessId) }
         if ($null -eq $parent) { return $false }
         if ([DateTime]$current.CreationDate -lt [DateTime]$parent.CreationDate) { return $false }
         $current = $parent
@@ -55,10 +59,12 @@ function Test-DescendantOfLauncher($ProcessRecord, $Launcher) {
 
 function Get-VerifiedDescendants($Launcher) {
     $all = @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)
+    $snapshot = @{}
+    foreach ($record in $all) { $snapshot[[int]$record.ProcessId] = $record }
     $result = [System.Collections.Generic.List[object]]::new()
     foreach ($candidate in $all) {
         if ([int]$candidate.ProcessId -eq [int]$Launcher.pid) { continue }
-        if (Test-DescendantOfLauncher $candidate $Launcher) { $result.Add($candidate) }
+        if (Test-DescendantOfLauncher $candidate $Launcher $snapshot) { $result.Add($candidate) }
     }
     return @($result | Sort-Object { [DateTime]$_.CreationDate } -Descending)
 }
@@ -127,8 +133,21 @@ function Start-LoggedProcess([string] $Name, [string] $WorkingDirectory, [string
     $safeLog = $LogPath.Replace("'", "''")
     $safeDirectory = $WorkingDirectory.Replace("'", "''")
     $runner = "`$ErrorActionPreference='Continue'; Set-Location -LiteralPath '$safeDirectory'; & '$Command' $Arguments 2>&1 | ForEach-Object { `$line=`$_.ToString(); `$line=`$line -replace '(?i)(GEMINI_API_KEY|CINEKROS_POSTGRES_PASSWORD|TMDB_READ_ACCESS_TOKEN)\s*=\s*[^;\s]+', '`$1=[REDACTED]'; `$line=`$line -replace '(?i)(Password\s*=\s*)(`"[^`"]*`"|[^;\s]+)', '`$1[REDACTED]'; `$line=`$line -replace '(?i)(Host\s*=\s*[^;]+;Port\s*=\s*\d+;Database\s*=\s*[^;]+;Username\s*=\s*[^;]+;Password\s*=\s*)(`"[^`"]*`"|[^;\s]+)', '`$1[REDACTED]'; Add-Content -LiteralPath '$safeLog' -Value `$line -Encoding UTF8 }; exit `$LASTEXITCODE"
+    if (-not $Headless) {
+        $version = if ($env:CINEKROS_RUNTIME_PROFILE -eq 'actor-v6-isolated') { 'V6' } else { 'V5' }
+        $service = if ($Name -eq 'backend-launcher') { 'Backend' } else { 'Frontend' }
+        $title = "CineKros $version $([char]0x2014) $service"
+        $runner = "`$Host.UI.RawUI.WindowTitle='$title'; " + $runner.Replace("Add-Content -LiteralPath '$safeLog'", "Write-Host `$line; Add-Content -LiteralPath '$safeLog'")
+        # Keep the dedicated console open if the service exits unexpectedly.
+        $runner = $runner.Replace('exit $LASTEXITCODE', 'Write-Host "Service exited. Use start_script.cmd --stop to close this session."')
+    }
+    # Windows PowerShell must decode native .NET/Vite output as UTF-8 (EN/SR).
+    $runner = '[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $OutputEncoding=[Console]::OutputEncoding; ' + $runner
     $encodedRunner = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($runner))
-    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-EncodedCommand', $encodedRunner) -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru
+    $processArguments = @('-NoProfile', '-EncodedCommand', $encodedRunner)
+    if (-not $Headless) { $processArguments = @('-NoExit') + $processArguments }
+    $windowStyle = if ($Headless) { 'Hidden' } else { 'Normal' }
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $processArguments -WorkingDirectory $WorkingDirectory -WindowStyle $windowStyle -PassThru
     $processInfo = Get-CimProcess $process.Id
     if ($null -eq $processInfo) { throw "Could not identify the new $Name launcher process." }
     $entry = [pscustomobject]@{
@@ -147,29 +166,63 @@ function Start-LoggedProcess([string] $Name, [string] $WorkingDirectory, [string
     return $entry
 }
 
+if ($Stop) {
+    if (-not (Test-Path -LiteralPath $activePath)) { Write-Output 'No recorded launcher session.'; exit 0 }
+    $manifestPath = [IO.Path]::GetFullPath((Get-Content -Raw -LiteralPath $activePath | ConvertFrom-Json).manifest)
+    if (-not $manifestPath.StartsWith(([IO.Path]::GetFullPath($reportRoot) + '\'), [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($manifestPath) -ne 'owned-processes.json') { throw 'Invalid launcher ownership record.' }
+    $runDir = Split-Path -Parent $manifestPath
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    if ($manifest.status -eq 'stopped') { Write-Output 'Recorded session is already stopped; no process was touched.'; exit 0 }
+    if ($manifest.runId -ne (Split-Path -Leaf $runDir) -or $manifest.status -ne 'ready' -or $manifest.profile -notin @('v5', 'actor-v6-isolated')) { throw 'Invalid or incomplete launcher session record; no process was touched.' }
+    $entries = @($manifest.processes | Where-Object { $_.name -in @('backend-launcher', 'frontend-launcher') })
+    if ($entries.Count -ne 2 -or @($entries.name | Select-Object -Unique).Count -ne 2) { throw 'Invalid launcher ownership entries; no process was touched.' }
+    foreach ($entry in $entries) {
+        $expectedLog = Join-Path $runDir $(if ($entry.name -eq 'backend-launcher') { 'backend.log' } else { 'frontend.log' })
+        $expectedCommand = if ($entry.name -eq 'backend-launcher') { 'dotnet.exe ' } else { 'node.exe ' }
+        if ($entry.executablePath -ne "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -or
+            $entry.commandLine -notmatch ' -NoProfile -EncodedCommand ' -or
+            -not ([string]$entry.command).StartsWith($expectedCommand, [StringComparison]::Ordinal) -or
+            $entry.log -ne $expectedLog) { throw 'Invalid launcher command identity; no process was touched.' }
+        $ownedLaunchers.Add($entry)
+    }
+    Stop-OwnedProcesses
+    $manifest.status = 'stopped'
+    Save-Manifest
+    Write-Output 'Recorded session stopped; unrelated processes and PostgreSQL were not changed.'
+    exit 0
+}
+
 try {
-    foreach ($port in @(5179, 5173)) {
+    foreach ($port in @($backendPort, 5173)) {
         if ((Get-ListenerPids $port).Count -gt 0) { throw "Port $port is occupied; no existing process was changed." }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $frontendDir 'node_modules\vite\bin\vite.js') -PathType Leaf)) { throw 'Vite is not installed locally; no package installation was attempted.' }
     if ([string]::IsNullOrWhiteSpace($env:CINEKROS_E5_MODEL_DIR) -or -not (Test-Path -LiteralPath (Join-Path $env:CINEKROS_E5_MODEL_DIR 'model_qint8_avx512_vnni.onnx') -PathType Leaf)) { throw 'Pinned E5 model artifact is unavailable.' }
+    $probe = [Net.Sockets.TcpClient]::new()
+    try {
+        $pending = $probe.BeginConnect('127.0.0.1', 5433, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(3000)) { throw 'PostgreSQL unavailable on port 5433; start Docker and the existing database container first.' }
+        $probe.EndConnect($pending)
+    } finally { $probe.Dispose() }
+    $backendDll = Join-Path $backendDir 'bin\Debug\net10.0\CineKros.Api.dll'
+    if (-not (Test-Path -LiteralPath $backendDll)) { throw 'Build CineKros.Api first; launcher does not install or restore dependencies.' }
 
     New-Item -ItemType Directory -Path $runDir -Force | Out-Null
     $manifest.status = 'starting'
     $backendLog = Join-Path $runDir 'backend.log'
-    $backend = Start-LoggedProcess 'backend-launcher' $backendDir 'dotnet.exe' 'run --no-launch-profile --urls http://127.0.0.1:5179' $backendLog
-    $backendListener = Wait-OwnedListener 5179 180 $backend
+    $backend = Start-LoggedProcess 'backend-launcher' $repoRoot 'dotnet.exe' "'$backendDll' --urls http://127.0.0.1:$backendPort" $backendLog
+    $backendListener = Wait-OwnedListener $backendPort 180 $backend
     $manifest.processes = @($manifest.processes) + @([pscustomobject]@{
         name = 'backend-listener'; pid = [int]$backendListener.ProcessId; executable = $backendListener.Name
-        executablePath = $backendListener.ExecutablePath; command = 'verified descendant listening on 127.0.0.1:5179'
+        executablePath = $backendListener.ExecutablePath; command = "verified descendant listening on 127.0.0.1:$backendPort"
         commandLine = Protect-LogText ([string]$backendListener.CommandLine); createdUtc = Convert-CreationUtc $backendListener.CreationDate; log = $backendLog
     })
     Save-Manifest
-    if (-not (Test-HttpStatus 'http://127.0.0.1:5179/' 404)) { throw 'Backend root did not return the expected 404 after startup readiness.' }
-    if (-not (Test-HttpStatus 'http://127.0.0.1:5179/api/recommendations' 405)) { throw 'API recommendation route did not return the expected method-only response.' }
+    if (-not (Test-HttpStatus "http://127.0.0.1:$backendPort/" 404)) { throw 'Backend root did not return the expected 404 after startup readiness.' }
+    if (-not (Test-HttpStatus "http://127.0.0.1:$backendPort/api/recommendations" 405)) { throw 'API recommendation route did not return the expected method-only response.' }
 
     $frontendLog = Join-Path $runDir 'frontend.log'
-    $frontend = Start-LoggedProcess 'frontend-launcher' $frontendDir 'npm.cmd' 'run dev -- --host 127.0.0.1 --port 5173 --strictPort' $frontendLog
+    $frontend = Start-LoggedProcess 'frontend-launcher' $frontendDir 'node.exe' 'node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort' $frontendLog
     $frontendListener = Wait-OwnedListener 5173 60 $frontend
     $manifest.processes = @($manifest.processes) + @([pscustomobject]@{
         name = 'frontend-listener'; pid = [int]$frontendListener.ProcessId; executable = $frontendListener.Name
@@ -183,8 +236,15 @@ try {
     $manifest.readyUtc = [DateTime]::UtcNow.ToString('o')
     $startupClock.Stop()
     $manifest.startupElapsedSeconds = [Math]::Round($startupClock.Elapsed.TotalSeconds, 2)
+    $manifest.profile = $env:CINEKROS_RUNTIME_PROFILE
+    $manifest.backendPort = $backendPort
+    $manifest.frontendApiBase = $env:VITE_API_BASE_URL
     Save-Manifest
-    Write-Output "Headless full runtime ready: API root=404, API recommendations GET=405, UI=200; startupSeconds=$($manifest.startupElapsedSeconds); owned PID evidence and sanitized logs: $runDir"
+    @{ manifest = $manifestPath } | ConvertTo-Json | Set-Content -LiteralPath $activePath -Encoding UTF8
+    Write-Output "Runtime ready: profile=$($manifest.profile); backend=$backendPort; frontend=5173; startupSeconds=$($manifest.startupElapsedSeconds); logs: $runDir"
+    if (-not $Headless) {
+        Start-Process 'http://127.0.0.1:5173'
+    }
 } catch {
     $startupClock.Stop()
     $safeError = Protect-LogText ([string]$_.Exception.Message)

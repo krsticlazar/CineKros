@@ -1,151 +1,90 @@
 $ErrorActionPreference = 'Stop'
-$scriptPath = Join-Path $PSScriptRoot '..\src\start_script.cmd'
-$loaderPath = Join-Path $PSScriptRoot '..\src\load-startup-env.ps1'
-$content = Get-Content -Raw -LiteralPath $scriptPath
-$loader = Get-Content -Raw -LiteralPath $loaderPath
-
-function Assert-Contains([string] $Name, [string] $Text, [string] $Pattern) {
-    if ($Text -notmatch $Pattern) { throw "FAIL: $Name" }
-    Write-Output "PASS: $Name"
+$root = Split-Path -Parent $PSScriptRoot
+$loaderPath = Join-Path $root 'src/load-startup-env.ps1'
+$runtime = Get-Content -Raw (Join-Path $root 'src/start-headless-runtime.ps1')
+$loader = Get-Content -Raw $loaderPath
+$cmd = Get-Content -Raw (Join-Path $root 'src/start_script.cmd')
+function Assert($Condition, $Name) { if (-not $Condition) { throw "FAIL: $Name" }; Write-Output "PASS: $Name" }
+Assert ($loader.Contains('$process.WaitForExit()') -and $loader -notmatch '(?m)^\$process = Start-Process[^\r\n]* -Wait\b') 'startup waits only for bootstrap, not the independent service tree'
+foreach ($file in @($loaderPath, (Join-Path $root 'src/start-headless-runtime.ps1'))) {
+    $tokens = $null; $parseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors)
+    Assert ($parseErrors.Count -eq 0) "PowerShell syntax: $([IO.Path]::GetFileName($file)) ($($parseErrors -join '; '))"
 }
+Assert ($cmd -match '--v5' -and $cmd -match '--stop' -and $cmd -match '--headless') 'explicit legacy, stop and headless options'
+Assert ($cmd -match '--bootstrap-ready' -and $cmd -match 'start "CineKros %START_VERSION% - Backend" /D "%REPO_DIR%"' -and $cmd -match 'cmd\.exe /d /k dotnet' -and $cmd -match 'start "CineKros %START_VERSION% - Frontend" /D "%FRONTEND_DIR%"' -and $cmd -match 'cmd\.exe /d /k node node_modules/vite/bin/vite\.js' -and $cmd -match 'CINEKROS_RUNTIME_PROFILE%.*actor-v6-isolated.*v5') 'normal mode uses profile-guarded native CMD service consoles with correct working directories'
+Assert ($cmd -match '127\.0\.0\.1.*CINEKROS_BACKEND_PORT' -and $cmd -match 'Invoke-WebRequest.*5173' -and $cmd -match 'start "" "http://127.0.0.1:5173/') 'backend TCP readiness precedes frontend HTTP 200 and browser launch'
+Assert ($loader -match 'if \(\$Headless\)[\s\S]*start-headless-runtime\.ps1' -and $loader -match '--bootstrap-ready' -and $loader -match 'WaitForExit\(5000\)' -and $loader -match "BeginConnect\('127\.0\.0\.1', 5433" -and $loader -match '-NoNewWindow') 'headless remains legacy while normal mode performs bounded existing-service preflight in control console'
+Assert ($loader -notmatch "Test-HttpStatus.*(404|405)" -and $cmd -notmatch '404|405' -and $cmd -notmatch '>>|2>') 'normal route has no 404/405 probes or service log redirection'
+Assert ($cmd -match 'CineKros.*CTRL\+C' -and $cmd -match 'start "CineKros %START_VERSION%') 'independent service consoles communicate manual shutdown'
+Assert ($runtime -match 'Test-DescendantOfLauncher' -and $runtime -match 'createdUtc' -and $runtime -match 'executablePath') 'ownership checks include process identity, not PID alone'
+Assert ($runtime.IndexOf("Test-HttpStatus 'http://127.0.0.1:5173/' 200") -lt $runtime.IndexOf("Start-Process 'http://127.0.0.1:5173'")) 'browser opens after readiness'
+Assert ($runtime -notmatch 'compose|migrat|import|taskkill|Stop-Process -Name') 'no database mutations or broad process termination'
 
-function Assert-Order([string] $Name, [string[]] $Patterns) {
-    $cursor = -1
-    foreach ($pattern in $Patterns) {
-        $match = [regex]::Match($content, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        if (-not $match.Success -or $match.Index -le $cursor) { throw "FAIL: $Name" }
-        $cursor = $match.Index
-    }
-    Write-Output "PASS: $Name"
+# Load only pure ownership functions, never the runtime entry point or Stop-Process.
+$runtimeAst = [Management.Automation.Language.Parser]::ParseInput($runtime, [ref]$null, [ref]$null)
+$functions = $runtimeAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Protect-LogText','Convert-CreationUtc','Test-DescendantOfLauncher') }, $false)
+. ([scriptblock]::Create(($functions.Extent.Text -join "`n")))
+$created = [DateTime]::Parse('2026-10-17T12:00:00Z').ToUniversalTime()
+$record = [pscustomobject]@{ ProcessId=123; CreationDate=$created; ExecutablePath='synthetic.exe'; CommandLine='synthetic --owned' }
+$owner = [pscustomobject]@{ pid=123; createdUtc=$created.ToString('o'); executablePath='synthetic.exe'; commandLine='synthetic --owned' }
+Assert (Test-DescendantOfLauncher $record $owner) 'matching ownership identity accepted'
+$owner.commandLine='different command'
+Assert (-not (Test-DescendantOfLauncher $record $owner)) 'changed command identity rejected'
+$owner.commandLine=$record.CommandLine; $owner.createdUtc=$created.AddSeconds(1).ToString('o')
+Assert (-not (Test-DescendantOfLauncher $record $owner)) 'PID reuse with different creation time rejected'
+$owner.createdUtc=$created.ToString('o'); $owner.executablePath='unrelated.exe'
+Assert (-not (Test-DescendantOfLauncher $record $owner)) 'different executable rejected'
+$owner.executablePath=$record.ExecutablePath
+$child=[pscustomobject]@{ProcessId=124;ParentProcessId=123;CreationDate=$created.AddSeconds(1)}
+Assert (Test-DescendantOfLauncher $child $owner @{123=$record}) 'verified descendant accepted'
+Assert (-not (Test-DescendantOfLauncher $child $owner @{})) 'missing parent rejected without guessing'
+Assert ($cmd.IndexOf('set "STARTUP_DIR=%~dp0"') -lt $cmd.IndexOf('shift')) 'CMD location preserved before option SHIFT'
+Assert ($runtime.Contains('$windowStyle = if ($Headless) { ''Hidden'' } else { ''Normal'' }')) 'headless stays hidden; interactive service windows are visible'
+Assert ($runtime.Contains('Write-Host `$line; Add-Content') -and $runtime.Contains("@('-NoExit')")) 'interactive windows display actual streamed log lines and remain open'
+Assert ($runtime -notmatch 'Read-Host') 'startup does not keep an ENTER control console'
+Assert ($cmd -match 'START_EXIT.*errorlevel[\s\S]*START_INTERACTIVE.*pause') 'interactive startup failure remains readable'
+
+# Exercise the real credential/configuration loader with an isolated capture stub.
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ('cinekros-startup-validation-' + [guid]::NewGuid().ToString('N'))
+$src = Join-Path $scratch 'src'
+New-Item -ItemType Directory -Path $src -Force | Out-Null
+Copy-Item -LiteralPath $loaderPath -Destination $src
+@'
+param([switch]$Headless,[switch]$Stop)
+@{profile=$env:CINEKROS_RUNTIME_PROFILE;api=$env:VITE_API_BASE_URL;db=$env:DATABASE_CONNECTION_STRING;password=$env:CINEKROS_POSTGRES_PASSWORD;mode=$env:CINEKROS_RECOMMENDATION_MODE;stop=[bool]$Stop} | ConvertTo-Json | Set-Content (Join-Path $PSScriptRoot 'capture.json')
+exit 0
+'@ | Set-Content (Join-Path $src 'start-headless-runtime.ps1')
+function Run-Loader([string]$Options = '', [string]$Mode = 'fake') {
+    $capture = Join-Path $src 'capture.json'
+    Remove-Item -LiteralPath $capture -ErrorAction SilentlyContinue
+    $info = [Diagnostics.ProcessStartInfo]::new('powershell.exe')
+    $info.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $src 'load-startup-env.ps1') + '" -LauncherPath unused ' + $Options
+    $info.UseShellExecute=$false; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
+    foreach ($name in @('CINEKROS_POSTGRES_PASSWORD','GEMINI_API_KEY')) { [void]$info.EnvironmentVariables.Remove($name) }
+    $info.EnvironmentVariables['CINEKROS_RECOMMENDATION_MODE']=$Mode
+    $process = [Diagnostics.Process]::Start($info)
+    $output = $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    Assert (-not $output.Contains('synthetic-secret')) 'no credential output'
+    return @{exit=$process.ExitCode;data=if(Test-Path $capture){Get-Content -Raw $capture|ConvertFrom-Json}else{$null}}
 }
-
-function Assert-LoopContains([string] $Name, [string] $Header, [string] $RequiredPattern) {
-    $headerMatch = [regex]::Match($content, [regex]::Escape($Header), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if (-not $headerMatch.Success) { throw "FAIL: $Name" }
-    $end = $content.IndexOf("`n)", $headerMatch.Index)
-    if ($end -lt 0 -or $content.Substring($headerMatch.Index, $end - $headerMatch.Index) -notmatch $RequiredPattern) { throw "FAIL: $Name" }
-    Write-Output "PASS: $Name"
-}
-
-Assert-Contains 'launcher resolves an absolute repository root from its own location' $content 'for %%I in \("%~dp0\.\."\) do set "REPO_DIR=%%~fI"'
-if ($content -match 'net session|Verb RunAs') { throw 'FAIL: local Docker CLI startup unexpectedly requires administrator elevation' }
-Write-Output 'PASS: local Docker CLI startup does not require administrator elevation'
-Assert-Contains 'PowerShell loader runs before Docker and Docker receives child process environment' $content 'load-startup-env\.ps1[\s\S]*?docker\.exe info'
-Assert-Contains 'loader reads root .env without emitting values' $loader 'ReadAllLines\(\$envPath\)[\s\S]*?\$env:CINEKROS_POSTGRES_PASSWORD = Get-LocalValue[\s\S]*?Start-Process'
-Assert-Contains 'existing process credential has precedence over root .env' $loader 'GetEnvironmentVariable\(\$Name, ''Process''\)[\s\S]*?if \(\$null -ne \$existing\)'
-Assert-Contains 'real mode derives local process-only database and E5 configuration' $loader 'CINEKROS_RECOMMENDATION_MODE = ''real''[\s\S]*?GEMINI_API_KEY = Get-LocalValue[\s\S]*?DATABASE_CONNECTION_STRING[\s\S]*?CINEKROS_E5_MODEL_DIR'
-Assert-Contains 'launcher waits for its direct child only' $loader '\$process\.WaitForExit\(\)'
-Assert-Contains 'Docker-ready check bypasses Desktop launch' $content 'docker\.exe info >nul 2>&1\s*if not errorlevel 1 goto docker_ready[\s\S]*?if not exist "%ProgramFiles%\\Docker\\Docker\\Docker Desktop\.exe"[\s\S]*?start "" "%ProgramFiles%\\Docker\\Docker\\Docker Desktop\.exe"'
-Assert-Order 'Docker ready, Compose, database health, backend, frontend, browser order is preserved' @(
-    'docker\.exe info >nul 2>&1',
-    'docker\.exe compose -f .* up -d cinekros-postgres',
-    ':database_ready',
-    'start "CineKros Backend"',
-    'start "CineKros Frontend"',
-    'start "" "http://localhost:5173"'
-)
-Assert-LoopContains 'Docker engine waits are bounded to 120 seconds' 'for /l %%I in (1,1,60)' 'docker\.exe info'
-Assert-LoopContains 'database health waits are bounded to 90 seconds' 'for /l %%I in (1,1,45)' 'docker\.exe inspect'
-Assert-Contains 'database health accepts LF-only Docker output without findstr' $content 'for /f "delims=" %%H in \(''docker\.exe inspect[\s\S]*?if /i "%%H"=="healthy" goto database_ready'
-if ($content -match 'docker\.exe inspect[^\r\n]*\|\s*findstr') { throw 'FAIL: LF-only Docker health output still uses findstr' }
-Assert-Contains 'backend and frontend readiness waits remain bounded' $content 'backend nije postao dostupan u roku od 60 sekundi[\s\S]*?Frontend nije postao dostupan u roku od 60 sekundi'
-Assert-Contains 'real default, explicit fake override and local E5 model path remain explicit' $content 'if not defined CINEKROS_RECOMMENDATION_MODE set "CINEKROS_RECOMMENDATION_MODE=real"[\s\S]*?Development fake[\s\S]*?DATABASE_CONNECTION_STRING[\s\S]*?GEMINI_API_KEY[\s\S]*?CINEKROS_E5_MODEL_DIR[\s\S]*?model_qint8_avx512_vnni\.onnx'
-
-if ($content -match '(?im)\bstart\s+docker\b|docker://|App\s*Picker|docker\.exe\s+compose\s+down\s+-v|docker\.exe\s+volume\s+rm|docker\.exe\s+system\s+prune|docker\.exe\s+rm\s+-f') {
-    throw 'FAIL: forbidden launcher, App Picker, or destructive Docker operation found'
-}
-Write-Output 'PASS: no App Picker path, forbidden Docker launcher, or destructive Docker operation'
-
-# Exercise the loader only against isolated synthetic credentials and a fake CMD launcher.
-$scratch = Join-Path ([System.IO.Path]::GetTempPath()) ('cinekros-startup-validation-' + [guid]::NewGuid().ToString('N'))
-$srcDir = Join-Path $scratch 'src'
-New-Item -ItemType Directory -Path $srcDir -Force | Out-Null
-Copy-Item -LiteralPath $loaderPath -Destination (Join-Path $srcDir 'load-startup-env.ps1')
-$fakeLauncher = Join-Path $scratch 'capture.cmd'
-$capturePath = Join-Path $scratch 'captured.txt'
-$configCapturePath = Join-Path $scratch 'config.txt'
-Set-Content -LiteralPath $fakeLauncher -Encoding Ascii -Value @(
-    '@echo off',
-    ('> "{0}" echo %CINEKROS_POSTGRES_PASSWORD%' -f $capturePath),
-    ('> "{0}" echo %CINEKROS_RECOMMENDATION_MODE%' -f $configCapturePath),
-    ('if defined GEMINI_API_KEY >> "{0}" echo KEY_PRESENT' -f $configCapturePath),
-    ('if defined DATABASE_CONNECTION_STRING >> "{0}" echo DB_PRESENT' -f $configCapturePath),
-    ('if defined CINEKROS_E5_MODEL_DIR >> "{0}" echo E5_PRESENT' -f $configCapturePath)
-)
-$testSecret = 'synthetic-startup-secret-8742'
-$powerShellExe = (Get-Command powershell.exe).Source
-
-function Invoke-IsolatedLoader([string] $ExpectedPassword, [switch] $SetProcessPassword, [string] $Mode = 'fake') {
-    Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $configCapturePath -Force -ErrorAction SilentlyContinue
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $powerShellExe
-    $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -LauncherPath "{1}"' -f (Join-Path $srcDir 'load-startup-env.ps1'), $fakeLauncher
-    $startInfo.UseShellExecute = $false
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    [void] $startInfo.EnvironmentVariables.Remove('CINEKROS_POSTGRES_PASSWORD')
-    [void] $startInfo.EnvironmentVariables.Remove('GEMINI_API_KEY')
-    [void] $startInfo.EnvironmentVariables.Remove('DATABASE_CONNECTION_STRING')
-    [void] $startInfo.EnvironmentVariables.Remove('CINEKROS_E5_MODEL_DIR')
-    if ($Mode -ne 'default') { $startInfo.EnvironmentVariables['CINEKROS_RECOMMENDATION_MODE'] = $Mode } else { [void] $startInfo.EnvironmentVariables.Remove('CINEKROS_RECOMMENDATION_MODE') }
-    if ($SetProcessPassword) { $startInfo.EnvironmentVariables['CINEKROS_POSTGRES_PASSWORD'] = $ExpectedPassword }
-    $child = [System.Diagnostics.Process]::new()
-    $child.StartInfo = $startInfo
-    [void] $child.Start()
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
-    if (($stdout + $stderr).Contains($testSecret) -or ($stdout + $stderr).Contains($ExpectedPassword)) {
-        throw 'FAIL: loader exposed a synthetic secret in output'
-    }
-    return [pscustomobject]@{ ExitCode = $child.ExitCode; Output = $stdout + $stderr; CaptureExists = (Test-Path -LiteralPath $capturePath); Captured = if (Test-Path -LiteralPath $capturePath) { (Get-Content -Raw -LiteralPath $capturePath).TrimEnd("`r", "`n") } else { $null }; Config = if (Test-Path -LiteralPath $configCapturePath) { Get-Content -LiteralPath $configCapturePath } else { @() } }
-}
-
 try {
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value @('# synthetic test fixture', (' CINEKROS_POSTGRES_PASSWORD = "  {0}  " ' -f $testSecret))
-    $loaded = Invoke-IsolatedLoader -ExpectedPassword ('  ' + $testSecret + '  ')
-    if ($loaded.ExitCode -ne 0 -or -not $loaded.CaptureExists -or $loaded.Captured -ne ('  ' + $testSecret + '  ')) { throw "FAIL: quoted .env value was not safely loaded into the child process (exit=$($loaded.ExitCode), captured=$($loaded.CaptureExists), output=$($loaded.Output))" }
-    Write-Output 'PASS: quoted .env value and surrounding whitespace load into child process without output leakage'
-
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value 'UNRELATED=value'
-    $missing = Invoke-IsolatedLoader -ExpectedPassword $testSecret
-    if ($missing.ExitCode -eq 0 -or $missing.CaptureExists -or $missing.Output -notmatch 'CINEKROS_POSTGRES_PASSWORD') { throw "FAIL: missing password did not fail safely before launching child CMD (exit=$($missing.ExitCode), captured=$($missing.CaptureExists), output=$($missing.Output))" }
-    Write-Output 'PASS: missing .env entry fails before child CMD'
-
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value @('CINEKROS_POSTGRES_PASSWORD="unterminated')
-    $invalid = Invoke-IsolatedLoader -ExpectedPassword $testSecret
-    if ($invalid.ExitCode -eq 0 -or $invalid.CaptureExists -or $invalid.Output -notmatch 'navodnike') { throw 'FAIL: malformed quoted password did not fail safely before launching child CMD' }
-    Write-Output 'PASS: malformed .env entry fails before child CMD'
-
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value ('CINEKROS_POSTGRES_PASSWORD={0}' -f $testSecret)
-    $precedenceSecret = 'synthetic-process-secret-9631'
-    $precedence = Invoke-IsolatedLoader -ExpectedPassword $precedenceSecret -SetProcessPassword
-    if ($precedence.ExitCode -ne 0 -or -not $precedence.CaptureExists -or $precedence.Captured -ne $precedenceSecret) { throw 'FAIL: existing process value did not take precedence over root .env' }
-    Write-Output 'PASS: existing process value takes precedence over .env'
-
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value @('CINEKROS_POSTGRES_PASSWORD=synthetic-db-password', 'GEMINI_API_KEY=synthetic-gemini-key')
-    $real = Invoke-IsolatedLoader -ExpectedPassword 'synthetic-db-password' -Mode 'default'
-    if ($real.ExitCode -ne 0 -or $real.Config -notcontains 'real' -or $real.Config -notcontains 'KEY_PRESENT' -or $real.Config -notcontains 'DB_PRESENT' -or $real.Config -notcontains 'E5_PRESENT') { throw 'FAIL: default real mode did not load Gemini and derive DB/E5 configuration' }
-    Write-Output 'PASS: default real mode loads process-only Gemini and derives DB/E5 configuration'
-
-    Set-Content -LiteralPath (Join-Path $scratch '.env') -Encoding Ascii -Value 'CINEKROS_POSTGRES_PASSWORD=synthetic-db-password'
-    $missingKey = Invoke-IsolatedLoader -ExpectedPassword 'synthetic-db-password' -Mode 'default'
-    if ($missingKey.ExitCode -eq 0 -or $missingKey.CaptureExists -or $missingKey.Output -notmatch 'GEMINI_API_KEY') { throw 'FAIL: missing Gemini key did not fail before launching real mode' }
-    Write-Output 'PASS: missing Gemini key fails safely before real child launch'
+    @('CINEKROS_POSTGRES_PASSWORD="synthetic-secret"','GEMINI_API_KEY=synthetic-key') | Set-Content (Join-Path $scratch '.env')
+    $v6=Run-Loader '-Headless'
+    Assert ($v6.exit -eq 0 -and $v6.data.profile -eq 'actor-v6-isolated' -and $v6.data.mode -eq 'real' -and $v6.data.api -eq 'http://127.0.0.1:5186') 'default V6 overrides inherited fake mode and API target'
+    Assert ($v6.data.db -match 'Database=cinekros_v6_rehearsal_20261015t2154z_4fd266aa;' -and $v6.data.db -match 'default_transaction_read_only=on' -and $v6.data.password -eq 'synthetic-secret') 'V6 exact read-only database and quoted credential loading'
+    $v5=Run-Loader '-V5 -Headless' 'real'
+    Assert ($v5.exit -eq 0 -and $v5.data.profile -eq 'v5' -and $v5.data.api -eq 'http://127.0.0.1:5179' -and $v5.data.db -match 'Database=cinekros;') 'explicit V5 retains its own database and API target'
+    'CINEKROS_POSTGRES_PASSWORD=synthetic-secret' | Set-Content (Join-Path $scratch '.env')
+    $missing=Run-Loader
+    Assert ($missing.exit -ne 0 -and $null -eq $missing.data) 'missing Gemini key fails before child launch'
+    'CINEKROS_POSTGRES_PASSWORD="unterminated' | Set-Content (Join-Path $scratch '.env')
+    $bad=Run-Loader
+    Assert ($bad.exit -ne 0 -and $null -eq $bad.data) 'malformed secret fails closed'
+    $stop=Run-Loader '-Stop'
+    Assert ($stop.exit -eq 0 -and $stop.data.stop) 'stop works without reading credentials'
 } finally {
-    Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# Docker emits LF-only output on Windows. The old `findstr /x` readiness pipeline
-# rejected this exact healthy status; FOR /F must accept the same bytes.
-$lfHealthPath = Join-Path ([System.IO.Path]::GetTempPath()) ('cinekros-health-' + [guid]::NewGuid().ToString('N') + '.txt')
-try {
-    [System.IO.File]::WriteAllBytes($lfHealthPath, [byte[]](104,101,97,108,116,104,121,10))
-    $healthProbe = 'for /f "usebackq delims=" %H in ({0}) do @if /i "%H"=="healthy" echo HEALTH_OK' -f ('"' + $lfHealthPath + '"')
-    $healthOutput = & cmd.exe /d /s /c $healthProbe
-    if ($LASTEXITCODE -ne 0 -or $healthOutput -notcontains 'HEALTH_OK') { throw 'FAIL: LF-only healthy Docker status did not pass CMD readiness parsing' }
-    Write-Output 'PASS: LF-only Docker healthy output passes actual CMD readiness parsing'
-} finally {
-    Remove-Item -LiteralPath $lfHealthPath -Force -ErrorAction SilentlyContinue
+    $resolved=[IO.Path]::GetFullPath($scratch)
+    if ($resolved.StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved).StartsWith('cinekros-startup-validation-')) { Remove-Item -LiteralPath $resolved -Recurse -Force }
 }

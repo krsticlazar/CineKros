@@ -9,18 +9,20 @@ The frontend sends POST /api/recommendations with JSON containing language (sr o
 ```text
 HTTP request
   → ReadRequestAsync
-  → Gemini v5 structured output and validation
+  → selected Gemini V5/V6 structured output and validation
   → RealRecommendationService
   → selected-language readiness and local E5 query vector, when semanticQuery is present
   → one PostgreSQL query: hard-filtered eligible relation, then pgvector ranking
   → up to 10 movie cards
 ```
 
-The real flow uses the v5 prompt and schema from RealProviders/query-parser-v5.md and query-parser-v5.schema.json. GeminiRealQueryParser sends the request to gemini-3.1-flash-lite; RealParsedQueryValidator validates the response and rejects malformed or unsupported required conditions. The service revalidates its typed result before searching. Positive preferences that cannot be guaranteed may contribute to semanticQuery; mandatory conditions must be supported hard filters.
+The normal local launcher selects the V6 prompt and schema through `actor-v6-isolated`; the explicit V5 compatibility profile retains its V5 artifacts. GeminiRealQueryParser sends the request to gemini-3.1-flash-lite; RealParsedQueryValidator validates the response and rejects malformed or unsupported required conditions. The service revalidates its typed result before searching. V6 actors use structured ALL/ANY/exclude filters; director, mood and theme preferences remain semantic.
 
 ## Runtime modes and configuration
 
 CINEKROS_RECOMMENDATION_MODE accepts fake or real. When unset, only Development defaults to fake; other environments require an explicit value, and Production requires real. Fake mode uses FakeQueryParser and FakeMovieSearch and does not use Gemini or the real search repository.
+
+The deterministic fake/demo providers are grouped in [Development/FakeRecommendationProviders.cs](Development/FakeRecommendationProviders.cs). They remain available for offline HTTP regression tests, including ten/partial/zero results and simulated failures. This folder is organizational, not a new runtime or compile-time guard. The normal V6 launcher explicitly selects `real`; V6 profile validation rejects `fake`. Do not use the fake fixture phrases or their historical filter subset as the V6 parser specification. Shared request/response helpers and error codes stay at their existing paths because the real endpoint uses them too.
 
 Real mode requires these process environment variables:
 
@@ -42,8 +44,8 @@ The full multilingual runtime uses the language-aware MovieSearchRepository.Sear
 
 ## Key methods
 
-- GeminiRealQueryParser.ParseWithEvidenceAsync builds and sends the structured HTTP request, extracts the response text, and invokes the v5 validator.
-- RealParsedQueryValidator.ValidateV5 checks the provider checklist; its rating reader calls RatingThresholdNormalizer.TryNormalize to convert the requested threshold.
+- GeminiRealQueryParser.ParseWithEvidenceAsync builds and sends the structured HTTP request, extracts the response text, and invokes validation for the selected parser profile.
+- RealParsedQueryValidator.ValidateV5 / ValidateV6 check the corresponding provider checklist; rating normalization remains handled by RatingThresholdNormalizer.TryNormalize, while V6 actor names use ActorNameResolver.
 - RealRecommendationService.RecommendCoreAsync chooses hard-only search when no semantic query exists; otherwise it checks language readiness, normalizes Serbian text, embeds locally, and calls multilingual search.
 - HardFilterSqlBuilder.Build validates filter values and returns allowlisted WHERE fragments with typed parameters.
 - MovieSearchRepository.SearchHybridAsync(hardFilters, vector, language) selects the trusted vector column, validates dataset readiness, executes SQL, and maps rows in ReadMoviesAsync.
@@ -55,7 +57,8 @@ The full multilingual runtime uses the language-aware MovieSearchRepository.Sear
 |---|---|
 | [Program.cs](Program.cs) | Resolves runtime mode, registers services, configures CORS/rate limiting, validates real runtime readiness, and maps the recommendation route. |
 | [RecommendationEndpoint.cs](RecommendationEndpoint.cs) | Shared request validation, localized alerts, technical errors, and fake-mode endpoint. |
-| [Recommendations.cs](Recommendations.cs) | Fake-mode contracts and demo parser/search implementations. |
+| [Recommendations.cs](Recommendations.cs) | Legacy fake-mode contracts and shared API error codes; no simulated provider implementations. |
+| [Development/FakeRecommendationProviders.cs](Development/FakeRecommendationProviders.cs) | Deterministic fake parser/search providers retained for demo mode and offline HTTP regression tests; not the normal V6 flow. |
 | [Startup/RecommendationStartup.cs](Startup/RecommendationStartup.cs) | Mode resolution and dependency registration for fake, full real, and explicit Serbian POC modes. |
 | [Startup/ProductionHttpConfiguration.cs](Startup/ProductionHttpConfiguration.cs) | Validates allowed origins and configures the recommendation CORS policy. |
 | [RealFlow/RealRecommendationEndpoint.cs](RealFlow/RealRecommendationEndpoint.cs) | Real HTTP handler; maps validated results to movie cards and checks IMDb/TMDB URLs. |
@@ -76,7 +79,7 @@ For a local Windows launch, see the [normal startup launcher](../../start_script
 
 ## Isolated actor V6 runtime
 
-An unset `CINEKROS_RUNTIME_PROFILE`, or the explicit value `v5`, keeps the current runtime selection. The separate `actor-v6-isolated` value requires real mode, Development, `CINEKROS_SERBIAN_POC` unset/false, and the exact configured and actual database `cinekros_v6_rehearsal_20261015t2154z_4fd266aa`. Use a separate process on `http://localhost:5186` with existing secrets and model directory supplied only through its process environment; do not change normal launchers or production configuration. The connection enforces read-only transactions. Startup performs no migration/import.
+For direct API startup, an unset `CINEKROS_RUNTIME_PROFILE`, or the explicit value `v5`, retains V5 compatibility. The normal local launcher explicitly selects `actor-v6-isolated`, which requires real mode, Development, `CINEKROS_SERBIAN_POC` unset/false, and the exact configured and actual database `cinekros_v6_rehearsal_20261015t2154z_4fd266aa`. Its API uses port 5186 with existing secrets and model directory supplied only through its process environment. The connection enforces read-only transactions. This is local V6 activation, not production database cutover; startup performs no migration/import.
 
 This profile explicitly binds the V6 prompt/schema/validator to the accepted V6 catalog, actor provenance, both language corpora/formats/vector artifacts, and unchanged E5 model profile. Startup checks the full schema (including cast helper/CHECK/GIN definitions), migration ledger, all 9,730 ordered cast assignments and exact ordinal vocabulary before caching an immutable resolver. The schema hash uses the same exact SQL serialization as the importer, duplicated deliberately at the read-only runtime boundary without a runtime importer dependency. Full readiness can be called again to detect out-of-band corruption; such writes require reverification/restart. Per-request hard-only checks catalog and actor release state; semantic requests additionally check the selected vector language, with no fallback.
 
