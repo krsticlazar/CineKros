@@ -6,4 +6,4 @@
 model.SHA256SUMS text eol=lf
 Dockerfile.* text eol=lf
 # Reference SHA-256 identifies exact exported bytes, including JSON whitespace.
-reference/*.json -text
+reference/*.json -text -diff -merge
