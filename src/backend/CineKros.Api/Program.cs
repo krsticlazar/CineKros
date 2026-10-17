@@ -10,12 +10,13 @@ var recommendationMode = RecommendationStartup.ResolveMode(builder.Environment);
 var serbianPocMode = RecommendationStartup.ResolveSerbianPocMode(builder.Environment, recommendationMode);
 RecommendationStartup.RegisterServices(builder.Services, recommendationMode, serbianPocMode, builder.Environment);
 ProductionHttpConfiguration.AddRecommendationCors(builder.Services, builder.Configuration, builder.Environment);
+var trustedClientIp = TrustedClientIp.Parse(builder.Configuration);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.OnRejected = async (context, _) => await context.HttpContext.Response.WriteAsJsonAsync(new { error = new { code = ApiErrorCodes.RateLimited } });
     options.AddPolicy("recommendations", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        trustedClientIp.SelectClientIp(context.Connection.RemoteIpAddress, context.Request.Headers["CF-Connecting-IP"]) ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromSeconds(60), QueueLimit = 0, AutoReplenishment = true }));
 });
 
