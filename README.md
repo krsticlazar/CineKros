@@ -27,7 +27,7 @@ Raw data, translation dictionaries, generated catalogs/vectors, model binaries a
 | [Tests](tests/README.md) | MSTest projects, gated integration checks and API fixtures |
 | [Scripts](scripts/README.md) | Explicit local model bootstrap |
 
-[Solution study guide](slnx_README.md) lists project dependencies and a suggested reading order. Local consultation notes and manual testing material live under `docs/`, including `docs/testing/`; local notes and thesis materials are excluded from the public repository.
+The root [solution](CineKros.slnx) groups the .NET source and test projects; use the component READMEs above for details. Local consultation notes and manual testing material live under `docs/`, including `docs/testing/`; local notes and thesis materials are excluded from the public repository.
 
 ## Local development
 

@@ -4,6 +4,8 @@
 /research/
 /Diplomski/
 /diplomski/
+# Explicit privacy rule; the thesis-directory exclusions above already existed.
+/Diplomski/materijali/korpus.md
 /MANUAL_QUERY_TESTS.md
 /src/backend/CineKros.Api/RealProviders/query-parser-v1.md
 /src/backend/CineKros.Api/RealProviders/query-parser-v2.md
