@@ -3,12 +3,14 @@
 BEGIN TRANSACTION READ ONLY;
 -- Inspect the caller's effective schema; do not force public and hide a bad search_path.
 
+-- Every acceptance column must be true; a missing row or unknown value yields
+-- false (or an error), never NULL.
 SELECT current_database() = 'cinekros' AS expected_database,
        current_user = 'cinekrosreadonly' AS expected_runtime_role,
-       current_schema() = 'public' AS expected_schema,
+       COALESCE(current_schema() = 'public', false) AS expected_schema,
        current_setting('transaction_read_only') = 'on' AS transaction_is_read_only,
-       NOT (SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls
-            FROM pg_roles WHERE rolname = current_user) AS role_is_not_privileged,
+       COALESCE((SELECT NOT (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
+                 FROM pg_roles WHERE rolname = current_user), false) AS role_is_not_privileged,
        NOT EXISTS (
          SELECT 1
          FROM unnest(ARRAY['public.movies', 'public.movie_embeddings', 'public.catalog_import_state',
@@ -17,8 +19,44 @@ SELECT current_database() = 'cinekros' AS expected_database,
          WHERE has_table_privilege(current_user, target.table_name, privilege.privilege_name)
        ) AS role_has_no_write_privileges,
        current_setting('server_version_num')::integer / 10000 = 17 AS postgres_major_is_17,
-       (SELECT extversion = '0.8.6' FROM pg_extension WHERE extname = 'vector') AS pgvector_is_0_8_6,
+       COALESCE((SELECT extversion = '0.8.6' FROM pg_extension WHERE extname = 'vector'), false) AS pgvector_is_0_8_6,
        pg_size_pretty(pg_database_size(current_database())) AS database_size;
+
+-- Runtime role contract. has_*_privilege reports effective rights, including
+-- grants to PUBLIC and to inherited roles. Ownership uses MEMBER semantics so
+-- ownership through any granted role is rejected as well. Scope of owned
+-- objects: all relations, routines, types and operators in schema public.
+SELECT NOT has_database_privilege(current_user, current_database(), 'CREATE') AS role_cannot_create_in_database,
+       NOT has_database_privilege(current_user, current_database(), 'TEMPORARY') AS role_cannot_create_temporary_tables,
+       NOT has_schema_privilege(current_user, 'public', 'CREATE') AS role_cannot_create_in_public_schema,
+       COALESCE((SELECT NOT pg_has_role(current_user, database_meta.datdba, 'MEMBER')
+                 FROM pg_database AS database_meta
+                 WHERE database_meta.datname = current_database()), false) AS role_does_not_own_database,
+       COALESCE((SELECT NOT pg_has_role(current_user, schema_meta.nspowner, 'MEMBER')
+                 FROM pg_namespace AS schema_meta
+                 WHERE schema_meta.nspname = 'public'), false) AS role_does_not_own_public_schema,
+       NOT EXISTS (
+         SELECT 1 FROM pg_class AS relation_meta
+         WHERE relation_meta.relnamespace = 'public'::regnamespace
+           AND pg_has_role(current_user, relation_meta.relowner, 'MEMBER')
+         UNION ALL
+         SELECT 1 FROM pg_proc AS routine_meta
+         WHERE routine_meta.pronamespace = 'public'::regnamespace
+           AND pg_has_role(current_user, routine_meta.proowner, 'MEMBER')
+         UNION ALL
+         SELECT 1 FROM pg_type AS type_meta
+         WHERE type_meta.typnamespace = 'public'::regnamespace
+           AND pg_has_role(current_user, type_meta.typowner, 'MEMBER')
+         UNION ALL
+         SELECT 1 FROM pg_operator AS operator_meta
+         WHERE operator_meta.oprnamespace = 'public'::regnamespace
+           AND pg_has_role(current_user, operator_meta.oprowner, 'MEMBER')
+       ) AS role_owns_no_public_objects,
+       NOT EXISTS (
+         SELECT 1 FROM pg_roles AS other_role
+         WHERE other_role.rolname <> current_user
+           AND pg_has_role(current_user, other_role.oid, 'MEMBER')
+       ) AS role_has_no_role_memberships;
 
 SELECT count(*) AS movie_count,
        count(*) = 9730 AS movie_count_matches,
@@ -31,20 +69,23 @@ SELECT count(*) AS embedding_rows,
        count(*) FILTER (WHERE public.vector_dims(embedding) = 768) AS english_768d_rows,
        count(*) FILTER (WHERE public.vector_dims(embedding) = 768) = 9730 AS all_english_vectors_768d,
        count(*) FILTER (WHERE abs(public.vector_norm(embedding) - 1) <= 0.0001) AS english_unit_norm_rows,
+       count(*) FILTER (WHERE abs(public.vector_norm(embedding) - 1) <= 0.0001) = 9730 AS all_english_vectors_unit_norm,
        count(*) FILTER (WHERE embedding_sr IS NOT NULL) AS serbian_rows,
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL) = 9730 AS all_serbian_vectors_present,
        count(*) FILTER (WHERE embedding_sr IS NOT NULL AND public.vector_dims(embedding_sr) = 768) AS serbian_768d_rows,
        count(*) FILTER (WHERE embedding_sr IS NOT NULL AND public.vector_dims(embedding_sr) = 768) = 9730 AS all_serbian_vectors_768d,
-       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND abs(public.vector_norm(embedding_sr) - 1) <= 0.0001) AS serbian_unit_norm_rows
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND abs(public.vector_norm(embedding_sr) - 1) <= 0.0001) AS serbian_unit_norm_rows,
+       count(*) FILTER (WHERE embedding_sr IS NOT NULL AND abs(public.vector_norm(embedding_sr) - 1) <= 0.0001) = 9730 AS all_serbian_vectors_unit_norm
 FROM public.movie_embeddings;
 
-SELECT count(*) = 1
+SELECT COALESCE(count(*) = 1
        AND bool_and(catalog_version = 'CineKros-bilingual-actor-catalog-v6'
          AND btrim(catalog_jsonl_sha256) = '30b9b7ee9ef0f94cb1427e4b1921a296ba3692c621ac869c17e8c45dff3a7925'
          AND btrim(catalog_content_fingerprint) = '03e452c345576b5f369834e89016d43902259aa1903697b8b92123e4ea66f5d3'
          AND movie_count = 9730
          AND btrim(embedding_artifact_sha256) = '4593ce51cc7b981e07dba50cfe950d0daa3d1cc6a74d43a47c1038e341c5ff09'
          AND btrim(embedding_profile_fingerprint) = 'eac906ed78f7863573d13c9b0435de1b8f848fe92fc6ae08aa3621400260b1fe'
-         AND embedded_count = 9730) AS catalog_state_matches_v6_pins
+         AND embedded_count = 9730), false) AS catalog_state_matches_v6_pins
 FROM public.catalog_import_state WHERE id = 1;
 
 SELECT count(*) = 2
@@ -65,7 +106,7 @@ SELECT count(*) = 2
          AND dimension = 768 AND embedded_count = 9730) = 1 AS language_states_match_v6_pins
 FROM public.embedding_set_state;
 
-SELECT count(*) = 1
+SELECT COALESCE(count(*) = 1
        AND bool_and(schema_version = 'actor-catalog-state-v1'
          AND release_version = 'CineKros-bilingual-actor-catalog-v6'
          AND btrim(catalog_identity_sha256) = '03e452c345576b5f369834e89016d43902259aa1903697b8b92123e4ea66f5d3'
@@ -75,7 +116,7 @@ SELECT count(*) = 1
          AND btrim(cast_rules_sha256) = '9c34722165a8e6d15a950c95bccf0eed27d1bffc85ee71c346c73cabddd4ec0d'
          AND btrim(paired_descriptor_sha256) = '68011ca794b2adfb1ddc5058aa940d40b82cd8fb7ae64a7da40f8ea583da3bc5'
          AND btrim(baseline_descriptor_sha256) = '555a7aadf44ea88001bc903dab60a2d96c470b236e3b4b5d273733452d2fa0df'
-         AND btrim(schema_sha256) = '1975494c9655a14e08731ecd583673a8fbeb76c46f16078d0e4612fab61d6407') AS actor_state_matches_v6_pins
+         AND btrim(schema_sha256) = '1975494c9655a14e08731ecd583673a8fbeb76c46f16078d0e4612fab61d6407'), false) AS actor_state_matches_v6_pins
 FROM public.actor_catalog_state WHERE id = 1;
 
 WITH expected(version, sha256) AS (VALUES

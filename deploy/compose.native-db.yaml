@@ -1,6 +1,19 @@
 # Optional host-local PostgreSQL access for the native systemd API variant.
 # Use with `up postgres` only; the API and public tunnel stay containerized/off.
+#
+# The base `database` network is internal, and Docker may not program port
+# publication for a container attached only to internal networks. This override
+# therefore attaches PostgreSQL alone to a dedicated non-internal bridge so the
+# loopback-only binding below has a usable path. The extra bridge also gives
+# PostgreSQL an outbound route; it does not prove LAN isolation by itself.
 services:
   postgres:
     ports:
       - "127.0.0.1:5432:5432"
+    networks:
+      - database
+      - native_host
+
+networks:
+  native_host:
+    driver: bridge
