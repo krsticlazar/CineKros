@@ -105,3 +105,10 @@ Desktop.ini
 *.temp
 *.swp
 ~$*
+
+
+
+
+
+/presentation/*
+!/presentation/public_html/
