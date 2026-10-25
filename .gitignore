@@ -106,9 +106,24 @@ Desktop.ini
 *.swp
 ~$*
 
+# Private deployment preparation and its standalone validation project.
+/deploy/
+/tests/CineKros.DeployCheck.Tests/
+/.dockerignore
 
+# Local maintenance and historical workflows, not required by the default launcher.
+/scripts/
+/src/start_poc.cmd
+/src/start-poc.ps1
+/tests/validate-startup-script.ps1
+/tests/fixtures/archive/
+/database/docker/.gitkeep
+/database/migrations/.gitkeep
 
+# Detailed component notes stay available locally; publish only the root overview.
+README*.md
+!/README.md
 
-
+# Publish the static presentation, not its working prompts or source notes.
 /presentation/*
 !/presentation/public_html/

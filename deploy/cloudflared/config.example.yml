@@ -1,9 +1,0 @@
-# Named tunnel configuration. Supply the matching credentials JSON via the
-# external Compose secret; credentials are intentionally not stored here.
-tunnel: REPLACE_WITH_TUNNEL_UUID
-credentials-file: /run/secrets/cloudflared_credentials.json
-
-ingress:
-  - hostname: cinekros-api.xn--lazarkrsti-zhb.com
-    service: http://api:8080
-  - service: http_status:404
