@@ -139,6 +139,17 @@ describe('v2 recommendation frontend', () => {
     await user.click(screen.getByRole('button', { name: 'EN' })); expect(screen.getByRole('alert')).toHaveTextContent('There are too many requests right now.')
   })
 
+  it('shows a localized server-unavailable message for offline fetch and non-JSON edge errors', async () => {
+    const user = userEvent.setup(); const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch')); vi.stubGlobal('fetch', fetchMock)
+    render(<App />); await user.type(screen.getByRole('textbox'), 'film'); await user.click(screen.getByRole('button', { name: 'Pošalji' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Server CineKros-a trenutno nije dostupan. Proveri da li je laptop uključen')
+    await user.click(screen.getByRole('button', { name: 'EN' })); expect(screen.getByRole('alert')).toHaveTextContent('The CineKros server is currently unavailable. Check whether the laptop is on')
+
+    const edgeFetch = vi.fn().mockResolvedValue({ status: 530, headers: { get: () => 'text/html' }, json: () => Promise.reject(new SyntaxError('Unexpected token')) }); vi.stubGlobal('fetch', edgeFetch)
+    await user.click(screen.getByRole('button', { name: 'Try again' })); await user.clear(screen.getByRole('textbox')); await user.type(screen.getByRole('textbox'), 'film'); await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The CineKros server is currently unavailable.')
+  })
+
   it.each([1, 9, 10])('renders %s valid results and follows meta.partial', async (count) => {
     const user = userEvent.setup(); render(<App submit={() => Promise.resolve(response(count))} />); await user.type(screen.getByRole('textbox'), 'film'); await user.click(screen.getByRole('button', { name: 'Pošalji' }))
     await waitFor(() => expect(screen.getAllByRole('link', { name: /Otvori Film/ })).toHaveLength(count))

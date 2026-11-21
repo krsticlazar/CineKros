@@ -1,0 +1,9 @@
+{
+  "name": "cinekros",
+  "compatibility_date": "2026-11-21",
+  "assets": {
+    "directory": "./dist"
+  },
+  "workers_dev": false,
+  "preview_urls": false
+}
