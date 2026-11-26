@@ -2,7 +2,9 @@
 
 A bilingual movie recommendation application developed as Lazar Krstić's bachelor's thesis project.
 
-![CineKros logo](src/frontend/src/assets/CineKros_logo.svg)
+[![CineKros logo](src/frontend/src/assets/CineKros_logo.svg)](https://cinekros.lazarkrstic.com/)
+
+**Try CineKros:** [Open the live application](https://cinekros.lazarkrstic.com/) · **Project presentation:** [View the presentation](https://cinekros-presentation.lazarkrstic.com/)
 
 Users describe their preferences in English or Serbian, including Serbian Cyrillic. Gemini interprets the request into structured criteria; the ASP.NET Core backend validates them and PostgreSQL applies mandatory metadata and actor ALL/ANY/exclude filters. Descriptive preferences are ranked with a local multilingual E5 encoder and exact pgvector cosine search. Hard-filter-only requests skip the encoder. Each response contains at most ten movies.
 
